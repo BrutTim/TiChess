@@ -151,6 +151,132 @@ final class ModelSpec extends AnyFunSuite:
     assert(bad.isLeft)
   }
 
+  test("Rules.isInCheck detects rook and knight attacks") {
+    val rookCheck = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 0) -> Piece(Color.White, PieceType.King),
+        Pos(4, 7) -> Piece(Color.Black, PieceType.Rook)
+      )
+    )
+    assert(Rules.isInCheck(rookCheck, Color.White))
+    assert(!Rules.isInCheck(rookCheck, Color.Black))
+
+    val knightCheck = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 4) -> Piece(Color.White, PieceType.King),
+        Pos(5, 6) -> Piece(Color.Black, PieceType.Knight)
+      )
+    )
+    assert(Rules.isInCheck(knightCheck, Color.White))
+
+    val queenCheck = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 4) -> Piece(Color.White, PieceType.King),
+        Pos(1, 1) -> Piece(Color.Black, PieceType.Queen)
+      )
+    )
+    assert(Rules.isInCheck(queenCheck, Color.White))
+
+    val bishopCheck = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 4) -> Piece(Color.White, PieceType.King),
+        Pos(1, 1) -> Piece(Color.Black, PieceType.Bishop)
+      )
+    )
+    assert(Rules.isInCheck(bishopCheck, Color.White))
+  }
+
+  test("Rules.isInCheck false when line is blocked and when king missing") {
+    val blocked = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 0) -> Piece(Color.White, PieceType.King),
+        Pos(4, 7) -> Piece(Color.Black, PieceType.Rook),
+        Pos(4, 3) -> Piece(Color.White, PieceType.Pawn)
+      )
+    )
+    assert(!Rules.isInCheck(blocked, Color.White))
+
+    val noWhiteKing = Board.empty.copy(pieces = Map(Pos(0, 0) -> Piece(Color.Black, PieceType.King)))
+    assert(!Rules.isInCheck(noWhiteKing, Color.White))
+
+    val whitePawnCheck = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 4) -> Piece(Color.Black, PieceType.King),
+        Pos(3, 3) -> Piece(Color.White, PieceType.Pawn)
+      )
+    )
+    assert(Rules.isInCheck(whitePawnCheck, Color.Black))
+
+    val kingAdjCheck = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 4) -> Piece(Color.White, PieceType.King),
+        Pos(5, 5) -> Piece(Color.Black, PieceType.King)
+      )
+    )
+    assert(Rules.isInCheck(kingAdjCheck, Color.White))
+  }
+
+  test("When in check, unrelated move is illegal") {
+    val b = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 0) -> Piece(Color.White, PieceType.King),  // e1
+        Pos(0, 0) -> Piece(Color.White, PieceType.Rook),  // a1
+        Pos(4, 7) -> Piece(Color.Black, PieceType.Rook),  // e8 gives check
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King)
+      )
+    )
+    val g = Game(b, Color.White)
+    val res = g.applyMove(Move(Pos(0, 0), Pos(0, 1))) // unrelated rook move
+    assert(res == Left("Illegal move: king would remain in check."))
+  }
+
+  test("Check can be resolved by capture, block, or king move to safe square") {
+    val captureBoard = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 0) -> Piece(Color.White, PieceType.King),
+        Pos(4, 1) -> Piece(Color.White, PieceType.Queen),
+        Pos(4, 7) -> Piece(Color.Black, PieceType.Rook),
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King)
+      )
+    )
+    val captureGame = Game(captureBoard, Color.White)
+    assert(captureGame.applyMove(Move(Pos(4, 1), Pos(4, 7))).isRight)
+
+    val blockBoard = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 0) -> Piece(Color.White, PieceType.King),   // e1
+        Pos(2, 1) -> Piece(Color.White, PieceType.Bishop), // c2 can block on e4
+        Pos(4, 7) -> Piece(Color.Black, PieceType.Rook),   // e8
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King)
+      )
+    )
+    val blockGame = Game(blockBoard, Color.White)
+    assert(blockGame.applyMove(Move(Pos(2, 1), Pos(4, 3))).isRight) // c2 -> e4 blocks line
+
+    val kingMoveBoard = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 0) -> Piece(Color.White, PieceType.King), // e1
+        Pos(4, 7) -> Piece(Color.Black, PieceType.Rook), // e8 check
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King)
+      )
+    )
+    val kingMoveGame = Game(kingMoveBoard, Color.White)
+    assert(kingMoveGame.applyMove(Move(Pos(4, 0), Pos(3, 0))).isRight) // e1 -> d1
+  }
+
+  test("King cannot move onto attacked square") {
+    val b = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 0) -> Piece(Color.White, PieceType.King), // e1
+        Pos(3, 7) -> Piece(Color.Black, PieceType.Rook), // d8 attacks d1
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King)
+      )
+    )
+    val g = Game(b, Color.White)
+    val res = g.applyMove(Move(Pos(4, 0), Pos(3, 0))) // e1 -> d1 into attack
+    assert(res == Left("Illegal move: king would remain in check."))
+  }
+
   test("Rules helpers: sign and squaresBetweenExclusive") {
     assert(Rules.sign(0) == 0)
     assert(Rules.sign(5) == 1)
@@ -163,5 +289,6 @@ final class ModelSpec extends AnyFunSuite:
 
     val b = Board.empty.copy(pieces = Map(Pos(0, 1) -> Piece(Color.White, PieceType.Pawn)))
     assert(!Rules.clearPath(b, Pos(0, 0), Pos(0, 3)))
+    assert(Rules.findKing(Board.empty.copy(pieces = Map(Pos(3, 3) -> Piece(Color.White, PieceType.King))), Color.White).contains(Pos(3, 3)))
   }
 

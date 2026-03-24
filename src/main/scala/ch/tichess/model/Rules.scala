@@ -21,6 +21,42 @@ object Rules:
   private[model] def clearPath(board: Board, from: Pos, to: Pos): Boolean =
     squaresBetweenExclusive(from, to).forall(p => board.isEmpty(p))
 
+  private[model] def findKing(board: Board, color: Color): Option[Pos] =
+    board.allPieces.collectFirst {
+      case (pos, Piece(c, PieceType.King)) if c == color => pos
+    }
+
+  private def attacksSquare(board: Board, from: Pos, piece: Piece, target: Pos): Boolean =
+    val df = target.file - from.file
+    val dr = target.rank - from.rank
+    val absDf = Math.abs(df)
+    val absDr = Math.abs(dr)
+
+    piece.kind match
+      case PieceType.King =>
+        absDf <= 1 && absDr <= 1 && (absDf != 0 || absDr != 0)
+      case PieceType.Queen =>
+        val okLine = (df == 0 && dr != 0) || (dr == 0 && df != 0) || (absDf == absDr && df != 0)
+        okLine && clearPath(board, from, target)
+      case PieceType.Rook =>
+        val okLine = (df == 0 && dr != 0) || (dr == 0 && df != 0)
+        okLine && clearPath(board, from, target)
+      case PieceType.Bishop =>
+        val okLine = absDf == absDr && df != 0
+        okLine && clearPath(board, from, target)
+      case PieceType.Knight =>
+        (absDf == 2 && absDr == 1) || (absDf == 1 && absDr == 2)
+      case PieceType.Pawn =>
+        val dir = if piece.color == Color.White then 1 else -1
+        absDf == 1 && dr == dir
+
+  def isInCheck(board: Board, color: Color): Boolean =
+    findKing(board, color).exists { kingPos =>
+      board.allPieces.exists { (from, piece) =>
+        piece.color != color && attacksSquare(board, from, piece, kingPos)
+      }
+    }
+
   def validateMove(board: Board, sideToMove: Color, move: Move): Either[String, Unit] =
     if move.from == move.to then Left("Source and destination must differ.")
     else
