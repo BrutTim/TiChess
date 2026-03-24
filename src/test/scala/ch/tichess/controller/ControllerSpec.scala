@@ -48,3 +48,21 @@ final class ControllerSpec extends AnyFunSuite:
     assert(quit.quit)
   }
 
+  test("Controller.update ends game with winner on checkmate") {
+    val board = Board.empty.copy(
+      pieces = Map(
+        Pos(0, 7) -> Piece(Color.Black, PieceType.King), // a8
+        Pos(2, 6) -> Piece(Color.White, PieceType.Queen), // c7
+        Pos(2, 5) -> Piece(Color.White, PieceType.King) // c6
+      )
+    )
+    val game = Game(board, Color.White)
+
+    // White plays Qb7#, black king on a8 has no escape.
+    val res = Controller.update(game, "c7 b7")
+    assert(res.quit)
+    assert(res.message.contains("Checkmate. White wins."))
+    assert(res.game.sideToMove == Color.Black)
+    assert(res.game.isCheckmate)
+  }
+

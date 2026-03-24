@@ -31,6 +31,10 @@ final case class UpdateResult(game: Game, message: Option[String], quit: Boolean
 object Controller:
   def initial: Game = Game.initial
 
+  private def colorLabel(c: Color): String = c match
+    case Color.White => "White"
+    case Color.Black => "Black"
+
   def update(game: Game, input: String): UpdateResult =
     Command.parse(input) match
       case Left(err) => UpdateResult(game, Some(err), quit = false)
@@ -41,4 +45,8 @@ object Controller:
       case Right(Command.MoveCmd(mv)) =>
         game.applyMove(mv) match
           case Left(err)     => UpdateResult(game, Some(err), quit = false)
-          case Right(nextGm) => UpdateResult(nextGm, None, quit = false)
+          case Right(nextGm) =>
+            if nextGm.isCheckmate then
+              val winner = colorLabel(nextGm.sideToMove.other)
+              UpdateResult(nextGm, Some(s"Checkmate. $winner wins."), quit = true)
+            else UpdateResult(nextGm, None, quit = false)

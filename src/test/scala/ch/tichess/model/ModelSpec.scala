@@ -277,6 +277,41 @@ final class ModelSpec extends AnyFunSuite:
     assert(res == Left("Illegal move: king would remain in check."))
   }
 
+  test("Game.isCheckmate is true when in check and no legal moves") {
+    val mateBoard = Board.empty.copy(
+      pieces = Map(
+        Pos(0, 7) -> Piece(Color.Black, PieceType.King), // a8
+        Pos(1, 6) -> Piece(Color.White, PieceType.Queen), // b7 gives check
+        Pos(2, 5) -> Piece(Color.White, PieceType.King) // c6 protects b7
+      )
+    )
+    val g = Game(mateBoard, Color.Black)
+    assert(g.isInCheck)
+    assert(g.legalMoves.isEmpty)
+    assert(g.isCheckmate)
+  }
+
+  test("Game.isCheckmate is false when check can be escaped") {
+    val checkBoard = Board.empty.copy(
+      pieces = Map(
+        Pos(0, 7) -> Piece(Color.Black, PieceType.King), // a8
+        Pos(0, 0) -> Piece(Color.White, PieceType.Rook), // a1 check on file
+        Pos(7, 0) -> Piece(Color.White, PieceType.King)
+      )
+    )
+    val g = Game(checkBoard, Color.Black)
+    assert(g.isInCheck)
+    assert(g.legalMoves.nonEmpty) // e.g. a8 -> b8
+    assert(!g.isCheckmate)
+  }
+
+  test("Game.isCheckmate is false when not in check") {
+    val g = Game.initial
+    assert(!g.isInCheck)
+    assert(g.legalMoves.nonEmpty)
+    assert(!g.isCheckmate)
+  }
+
   test("Rules helpers: sign and squaresBetweenExclusive") {
     assert(Rules.sign(0) == 0)
     assert(Rules.sign(5) == 1)
