@@ -1,6 +1,6 @@
 # TiChess
 
-Ein einfaches, konsolenbasiertes Schachspiel in Scala (MVC, funktional/immutable) mit automatisierten Tests und Coverage via scoverage.
+Ein einfaches Schachspiel in Scala (MVC, funktional/immutable) mit Console-UI, ScalaFX-GUI, automatisierten Tests und Coverage via scoverage.
 
 ## Entwickeln & Ausführen
 
@@ -22,6 +22,12 @@ sbt clean coverage test coverageReport
 sbt run
 ```
 
+### Starten (ScalaFX GUI)
+
+```bash
+sbt "runMain ch.tichess.GuiMain"
+```
+
 ## Konsolen-Kommandos
 
 - Zug eingeben: `e2 e4`
@@ -29,4 +35,3 @@ sbt run
 - Spiel beenden: `quit`
 - Position setzen (FEN, minimal): `fen <placement> <w|b>`
   - Beispiel: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`
-
