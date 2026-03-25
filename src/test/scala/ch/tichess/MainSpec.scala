@@ -36,7 +36,7 @@ final class MainSpec extends AnyFunSuite:
     val io = ConsoleApp.StdIO(
       () =>
         readCalled += 1
-        "x",
+        Some("x"),
       s => wrote = wrote :+ s
     )
     assert(io.readLine() == Some("x"))

@@ -16,13 +16,13 @@ object ConsoleApp:
     def readLine(): Option[String]
     def writeLine(s: String): Unit
 
-  final case class StdIO(read: () => String | Null, write: String => Unit) extends IO:
-    override def readLine(): Option[String] = Option(read())
+  final case class StdIO(read: () => Option[String], write: String => Unit) extends IO:
+    override def readLine(): Option[String] = read()
     override def writeLine(s: String): Unit = write(s)
 
   val LiveStdIO: StdIO =
     StdIO(
-      () => scala.io.StdIn.readLine(),
+      () => Option(scala.io.StdIn.readLine()),
       (s: String) => println(s)
     )
 
