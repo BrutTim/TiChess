@@ -21,3 +21,12 @@ sbt clean coverage test coverageReport
 ```bash
 sbt run
 ```
+
+## Konsolen-Kommandos
+
+- Zug eingeben: `e2 e4`
+- Hilfe anzeigen: `help`
+- Spiel beenden: `quit`
+- Position setzen (FEN, minimal): `fen <placement> <w|b>`
+  - Beispiel: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`
+

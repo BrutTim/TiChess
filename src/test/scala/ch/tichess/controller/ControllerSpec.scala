@@ -19,6 +19,12 @@ final class ControllerSpec extends AnyFunSuite:
     assert(Command.parse("e2  e4  ").isRight)
   }
 
+  test("Command.parse handles fen command and rejects missing payload") {
+    assert(Command.parse("fen").left.exists(_.contains("Expected a FEN")))
+    assert(Command.parse("fen   ").left.exists(_.contains("Expected a FEN")))
+    assert(Command.parse("fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w").isRight)
+  }
+
   test("Controller.update returns messages and updates game") {
     val g0 = Controller.initial
 
@@ -39,31 +45,19 @@ final class ControllerSpec extends AnyFunSuite:
 
     val help = Controller.update(g0, "help")
     assert(help.game == g0)
-    assert(help.message.contains("Enter moves like 'e2 e4'. Commands: help, quit."))
+    assert(help.message.contains(List(
+                                      "- Zug eingeben: `e2 e4`",
+                                      "- Hilfe anzeigen: `help`",
+                                      "- Spiel beenden: `quit`",
+                                      "- Position setzen (FEN, minimal): `fen <placement> <w|b>`",
+                                      "- Beispiel: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
+                                    ).mkString("\n")))
     assert(!help.quit)
 
     val quit = Controller.update(g0, "quit")
     assert(quit.game == g0)
     assert(quit.message.contains("Bye."))
     assert(quit.quit)
-  }
-
-  test("Controller.update ends game with winner on checkmate") {
-    val board = Board.empty.copy(
-      pieces = Map(
-        Pos(0, 7) -> Piece(Color.Black, PieceType.King), // a8
-        Pos(2, 6) -> Piece(Color.White, PieceType.Queen), // c7
-        Pos(2, 5) -> Piece(Color.White, PieceType.King) // c6
-      )
-    )
-    val game = Game(board, Color.White)
-
-    // White plays Qb7#, black king on a8 has no escape.
-    val res = Controller.update(game, "c7 b7")
-    assert(res.quit)
-    assert(res.message.contains("Checkmate. White wins."))
-    assert(res.game.sideToMove == Color.Black)
-    assert(res.game.isCheckmate)
   }
 
   test("Controller.update ends game with black winner on checkmate") {
@@ -82,5 +76,29 @@ final class ControllerSpec extends AnyFunSuite:
     assert(res.message.contains("Checkmate. Black wins."))
     assert(res.game.sideToMove == Color.White)
     assert(res.game.isCheckmate)
+  }
+
+  test("Controller.update sets position from FEN without showing FEN in output") {
+    val fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w"
+    val res = Controller.update(Controller.initial, s"fen $fen")
+    assert(!res.quit)
+    assert(res.message.contains("Position set."))
+    assert(res.game == Fen.parse(fen).toOption.get)
+  }
+
+  test("Controller.update ends game when set FEN is already checkmate") {
+    val mateFen = "k7/1Q6/2K5/8/8/8/8/8 b"
+    val res = Controller.update(Controller.initial, s"fen $mateFen")
+    assert(res.quit)
+    assert(res.message.contains("Checkmate. White wins."))
+    assert(res.game.isCheckmate)
+    assert(res.game.sideToMove == Color.Black)
+  }
+
+  test("Controller.update returns error when FEN parsing fails") {
+    val res = Controller.update(Controller.initial, "fen 8/8/8/8/8/8/8/4K3 x")
+    assert(!res.quit)
+    assert(res.game == Controller.initial)
+    assert(res.message.exists(_.contains("FEN side-to-move must be 'w' or 'b'.")))
   }
 
