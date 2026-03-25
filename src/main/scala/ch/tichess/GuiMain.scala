@@ -23,25 +23,29 @@ object GuiMain extends JFXApp3:
 
   private val adapter = new GuiViewAdapter()
   private val squares = mutable.Map.empty[Pos, SquareNode]
-
-  private val statusLabel = new Label {
-    style = "-fx-font-size: 15px; -fx-font-weight: bold;"
-  }
-
-  private val infoLabel = new Label {
-    style = "-fx-font-size: 13px; -fx-text-fill: #334155;"
-  }
-
-  private val moveList = new ListView[String] {
-    prefWidth = 250
-    minHeight = squareSize * 8
-  }
-
-  private val fenField = new TextField {
-    promptText = "fen <placement> <w|b>"
-  }
+  private var statusLabel: Label = null
+  private var infoLabel: Label = null
+  private var moveList: ListView[String] = null
+  private var fenField: TextField = null
 
   override def start(): Unit =
+    statusLabel = new Label {
+      style = "-fx-font-size: 15px; -fx-font-weight: bold;"
+    }
+
+    infoLabel = new Label {
+      style = "-fx-font-size: 13px; -fx-text-fill: #334155;"
+    }
+
+    moveList = new ListView[String] {
+      prefWidth = 250
+      minHeight = squareSize * 8
+    }
+
+    fenField = new TextField {
+      promptText = "fen <placement> <w|b>"
+    }
+
     val boardGrid = buildBoardGrid()
 
     val setButton = new Button("Set") {
