@@ -21,7 +21,7 @@ final class MainSpec extends AnyFunSuite:
   }
 
   test("ConsoleApp.run stops on null input") {
-    val io = new FakeIO(Nil, returnNullImmediately = true)
+    val io = new FakeIO(Nil)
     ConsoleApp.run(io)
     assert(io.outputs.size == 1) // initial board render only
   }
@@ -36,10 +36,10 @@ final class MainSpec extends AnyFunSuite:
     val io = ConsoleApp.StdIO(
       () =>
         readCalled += 1
-        "x",
+        Some("x"),
       s => wrote = wrote :+ s
     )
-    assert(io.readLine() == "x")
+    assert(io.readLine() == Some("x"))
     io.writeLine("y")
     assert(readCalled == 1)
     assert(wrote == List("y"))
@@ -56,8 +56,8 @@ final class MainSpec extends AnyFunSuite:
   test("ScriptIO readLine covers Nil and non-Nil branches") {
     val out: String => Unit = _ => ()
     val io = ConsoleApp.ScriptIO(List("a"), out)
-    assert(io.readLine() == "a")
-    assert(io.readLine() == null)
+    assert(io.readLine() == Some("a"))
+    assert(io.readLine().isEmpty)
     io.writeLine("x") // cover writeLine
   }
 
@@ -68,25 +68,18 @@ final class MainSpec extends AnyFunSuite:
 
   test("LiveStdIO read lambda can be invoked without blocking") {
     scala.Console.withIn(new java.io.StringReader("hello\n")) {
-      assert(ConsoleApp.LiveStdIO.readLine() == "hello")
+      assert(ConsoleApp.LiveStdIO.readLine().contains("hello"))
     }
   }
 
-private final class FakeIO(lines: List[String], returnNullImmediately: Boolean = false) extends ConsoleApp.IO:
-  private var remaining: List[String] = lines
+private final class FakeIO(lines: List[String]) extends ConsoleApp.IO:
+  private val it = lines.iterator
   private var wrote: Vector[String] = Vector.empty
 
   def outputs: Vector[String] = wrote
 
-  override def readLine(): String | Null =
-    if returnNullImmediately then null
-    else
-      remaining match
-        case Nil =>
-          null
-        case h :: t =>
-          remaining = t
-          h
+  override def readLine(): Option[String] =
+    if it.hasNext then Some(it.next()) else None
 
   override def writeLine(s: String): Unit =
     wrote = wrote :+ s

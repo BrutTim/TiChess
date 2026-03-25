@@ -13,27 +13,23 @@ object Main:
 
 object ConsoleApp:
   trait IO:
-    def readLine(): String | Null
+    def readLine(): Option[String]
     def writeLine(s: String): Unit
 
-  final case class StdIO(read: () => String | Null, write: String => Unit) extends IO:
-    override def readLine(): String | Null = read()
+  final case class StdIO(read: () => Option[String], write: String => Unit) extends IO:
+    override def readLine(): Option[String] = read()
     override def writeLine(s: String): Unit = write(s)
 
   val LiveStdIO: StdIO =
     StdIO(
-      () => scala.io.StdIn.readLine(),
+      () => Option(scala.io.StdIn.readLine()),
       (s: String) => println(s)
     )
 
   final case class ScriptIO(lines: List[String], out: String => Unit) extends IO:
-    private var remaining: List[String] = lines
-    override def readLine(): String | Null =
-      remaining match
-        case Nil => null
-        case h :: t =>
-          remaining = t
-          h
+    private val it = lines.iterator
+    override def readLine(): Option[String] =
+      if it.hasNext then Some(it.next()) else None
     override def writeLine(s: String): Unit = out(s)
 
   def run(io: IO): Unit =
@@ -42,10 +38,10 @@ object ConsoleApp:
   @annotation.tailrec
   private def loop(io: IO, game: ch.tichess.model.Game, message: Option[String]): Unit =
     io.writeLine(ConsoleView.render(game, message))
-    val in = io.readLine()
-    if in == null then ()
-    else
-      val res = Controller.update(game, in)
-      if res.quit then io.writeLine(ConsoleView.render(res.game, res.message))
-      else loop(io, res.game, res.message)
+    io.readLine() match
+      case None => ()
+      case Some(in) =>
+        val res = Controller.update(game, in)
+        if res.quit then io.writeLine(ConsoleView.render(res.game, res.message))
+        else loop(io, res.game, res.message)
 
