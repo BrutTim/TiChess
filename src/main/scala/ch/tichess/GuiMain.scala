@@ -1,7 +1,7 @@
 package ch.tichess
 
 import ch.tichess.model.*
-import ch.tichess.view.GuiViewAdapter
+import ch.tichess.view.{GuiViewAdapter, GuiViewState}
 import scalafx.application.JFXApp3
 import scalafx.collections.ObservableBuffer
 import scalafx.geometry.{Insets, Pos as FxPos}
@@ -10,9 +10,7 @@ import scalafx.scene.control.{Button, Label, ListView, TextField}
 import scalafx.scene.layout.{BorderPane, GridPane, HBox, Priority, StackPane, VBox}
 import scalafx.scene.paint.Color as FxColor
 import scalafx.scene.shape.Circle
-import scalafx.scene.text.{Font, FontWeight}
-
-import scala.collection.mutable
+import scalafx.scene.text.Font
 
 object GuiMain extends JFXApp3:
   private val squareSize = 68
@@ -22,41 +20,43 @@ object GuiMain extends JFXApp3:
   private final case class SquareNode(container: StackPane, pieceLabel: Label, targetMarker: Circle)
 
   private val adapter = new GuiViewAdapter()
-  private val squares = mutable.Map.empty[Pos, SquareNode]
-  private var statusLabel: Label = null
-  private var infoLabel: Label = null
-  private var moveList: ListView[String] = null
-  private var fenField: TextField = null
 
   override def start(): Unit =
-    statusLabel = new Label {
+    var state = adapter.initialState
+
+    val statusLabel = new Label {
       style = "-fx-font-size: 15px; -fx-font-weight: bold;"
     }
 
-    infoLabel = new Label {
+    val infoLabel = new Label {
       style = "-fx-font-size: 13px; -fx-text-fill: #334155;"
     }
 
-    moveList = new ListView[String] {
+    val moveList = new ListView[String] {
       prefWidth = 250
       minHeight = squareSize * 8
     }
 
-    fenField = new TextField {
+    val fenField = new TextField {
       promptText = "fen <placement> <w|b>"
     }
 
-    val boardGrid = buildBoardGrid()
+    var refreshUi: () => Unit = () => ()
+
+    def updateState(next: GuiViewState): Unit =
+      state = next
+      refreshUi()
+
+    val (boardGrid, squares) = buildBoardGrid(updateState, () => state)
+    refreshUi = () => render(state, statusLabel, infoLabel, moveList, squares)
 
     val setButton = new Button("Set") {
       onAction = _ =>
-        adapter.setFen(fenField.text.value)
-        refreshUi()
+        updateState(GuiViewAdapter.setFen(state, fenField.text.value))
     }
 
     fenField.onAction = _ =>
-      adapter.setFen(fenField.text.value)
-      refreshUi()
+      updateState(GuiViewAdapter.setFen(state, fenField.text.value))
 
     val fenRow = new HBox {
       spacing = 10
@@ -102,12 +102,20 @@ object GuiMain extends JFXApp3:
 
     refreshUi()
 
-  private def buildBoardGrid(): GridPane =
+  private def buildBoardGrid(updateState: GuiViewState => Unit, currentState: () => GuiViewState): (GridPane, Map[Pos, SquareNode]) =
     val grid = new GridPane {
       hgap = 0
       vgap = 0
       alignment = FxPos.CenterLeft
     }
+    val squares =
+      (for
+        row <- 0 until 8
+        rank = 7 - row
+        file <- 0 until 8
+        pos = Pos(file, rank)
+        node = createSquare(pos, updateState, currentState)
+      yield pos -> node).toMap
 
     for file <- 0 until 8 do
       val fileText = s"${('a' + file).toChar}"
@@ -122,15 +130,14 @@ object GuiMain extends JFXApp3:
 
       for file <- 0 until 8 do
         val pos = Pos(file, rank)
-        val node = createSquare(pos)
-        squares += pos -> node
+        val node = squares(pos)
         grid.add(node.container, file + 1, row + 1)
 
-    grid
+    (grid, squares)
 
-  private def createSquare(pos: Pos): SquareNode =
+  private def createSquare(pos: Pos, updateState: GuiViewState => Unit, currentState: () => GuiViewState): SquareNode =
     val pieceLabel = new Label {
-      font = Font.font("Menlo", FontWeight.Bold, 30)
+      font = Font.font(46)
       mouseTransparent = true
     }
 
@@ -151,8 +158,7 @@ object GuiMain extends JFXApp3:
       alignment = FxPos.Center
       children = Seq(targetMarker, pieceLabel)
       onMouseClicked = _ =>
-        adapter.handleSquareClick(pos)
-        refreshUi()
+        updateState(GuiViewAdapter.handleSquareClick(currentState(), pos))
     }
 
     SquareNode(square, pieceLabel, targetMarker)
@@ -165,11 +171,17 @@ object GuiMain extends JFXApp3:
       style = "-fx-font-size: 13px; -fx-text-fill: #475569;"
     }
 
-  private def refreshUi(): Unit =
-    val board = adapter.game.board
-    val selected = adapter.selectedPos
-    val legalTargets = adapter.legalTargetSquares
-    val gameOver = adapter.isGameOver
+  private def render(
+      state: GuiViewState,
+      statusLabel: Label,
+      infoLabel: Label,
+      moveList: ListView[String],
+      squares: Map[Pos, SquareNode]
+  ): Unit =
+    val board = state.game.board
+    val selected = state.selectedPos
+    val legalTargets = state.legalTargetSquares
+    val gameOver = state.isGameOver
 
     squares.foreach { (pos, square) =>
       val pieceOpt = board.pieceAt(pos)
@@ -177,7 +189,7 @@ object GuiMain extends JFXApp3:
       val legalHere = legalTargets.contains(pos)
 
       val baseColor =
-        if (pos.file + pos.rank) % 2 == 0 then lightSquare else darkSquare
+        if (pos.file + pos.rank) % 2 == 0 then darkSquare else lightSquare
 
       val borderColor =
         if selectedHere then "#f59e0b"
@@ -197,24 +209,25 @@ object GuiMain extends JFXApp3:
           square.pieceLabel.text = ""
         case Some(piece) =>
           square.pieceLabel.text = pieceSymbol(piece)
-          square.pieceLabel.textFill = piece.color match
-            case Color.White => FxColor.web("#1d4ed8")
-            case Color.Black => FxColor.web("#b91c1c")
+          square.pieceLabel.textFill =
+            piece.color match
+              case Color.White => FxColor.web("#ffffff")
+              case Color.Black => FxColor.web("#000000")
+          square.pieceLabel.style =
+            piece.color match
+              case Color.White => "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.65), 2, 0.3, 0, 0);"
+              case Color.Black => ""
     }
 
-    statusLabel.text = adapter.statusText
-    infoLabel.text = adapter.infoMessage.getOrElse("")
-    moveList.items = ObservableBuffer.from(adapter.moveEntries)
+    statusLabel.text = state.statusText
+    infoLabel.text = state.infoMessage.getOrElse("")
+    moveList.items = ObservableBuffer.from(state.moveEntries)
 
   private def pieceSymbol(piece: Piece): String =
-    val base = piece.kind match
-      case PieceType.King   => "k"
-      case PieceType.Queen  => "q"
-      case PieceType.Rook   => "r"
-      case PieceType.Bishop => "b"
-      case PieceType.Knight => "n"
-      case PieceType.Pawn   => "p"
-
-    piece.color match
-      case Color.White => base.toUpperCase
-      case Color.Black => base
+    piece.kind match
+      case PieceType.King   => "♚"
+      case PieceType.Queen  => "♛"
+      case PieceType.Rook   => "♜"
+      case PieceType.Bishop => "♝"
+      case PieceType.Knight => "♞"
+      case PieceType.Pawn   => "♟"

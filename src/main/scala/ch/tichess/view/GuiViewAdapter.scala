@@ -2,78 +2,84 @@ package ch.tichess.view
 
 import ch.tichess.model.*
 
-final class GuiViewAdapter(initialGame: Game = Game.initial):
-  private var currentGame: Game = initialGame
-  private var selected: Option[Pos] = None
-  private var legalTargets: Set[Pos] = Set.empty
-  private var info: Option[String] = None
-  private var moveLog: Vector[String] = Vector.empty
-
-  def game: Game = currentGame
-  def selectedPos: Option[Pos] = selected
-  def legalTargetSquares: Set[Pos] = legalTargets
-  def infoMessage: Option[String] = info
-  def moveEntries: Vector[String] = moveLog
-  def isGameOver: Boolean = currentGame.isCheckmate
+final case class GuiViewState(
+    game: Game,
+    selectedPos: Option[Pos] = None,
+    legalTargetSquares: Set[Pos] = Set.empty,
+    infoMessage: Option[String] = None,
+    moveEntries: Vector[String] = Vector.empty
+):
+  def isGameOver: Boolean = game.isCheckmate
 
   def statusText: String =
-    if currentGame.isCheckmate then s"Schachmatt - ${colorLabel(currentGame.sideToMove.other)} gewinnt"
+    if game.isCheckmate then s"Schachmatt - ${GuiViewAdapter.colorLabel(game.sideToMove.other)} gewinnt"
     else
-      val turn = s"${colorLabel(currentGame.sideToMove)} to move"
-      if currentGame.isInCheck then s"$turn | Schach" else turn
+      val turn = s"${GuiViewAdapter.colorLabel(game.sideToMove)} to move"
+      if game.isInCheck then s"$turn | Schach" else turn
 
-  def canSelect(pos: Pos): Boolean =
-    !isGameOver && currentGame.board.pieceAt(pos).exists(_.color == currentGame.sideToMove)
+object GuiViewState:
+  val initial: GuiViewState = GuiViewState(Game.initial)
 
-  def handleSquareClick(pos: Pos): Unit =
-    if isGameOver then ()
+final class GuiViewAdapter(initialGame: Game = Game.initial):
+  def initialState: GuiViewState = GuiViewState(initialGame)
+
+object GuiViewAdapter:
+  def canSelect(state: GuiViewState, pos: Pos): Boolean =
+    !state.isGameOver && state.game.board.pieceAt(pos).exists(_.color == state.game.sideToMove)
+
+  def handleSquareClick(state: GuiViewState, pos: Pos): GuiViewState =
+    if state.isGameOver then state
     else
-      selected match
+      state.selectedPos match
         case None =>
-          if canSelect(pos) then select(pos)
+          if canSelect(state, pos) then select(state, pos) else state
         case Some(from) =>
-          if from == pos then clearSelection()
-          else if legalTargets.contains(pos) then attemptMove(from, pos)
-          else if canSelect(pos) then select(pos)
+          if from == pos then clearSelection(state)
+          else if state.legalTargetSquares.contains(pos) then attemptMove(state, from, pos)
+          else if canSelect(state, pos) then select(state, pos)
+          else state
 
-  def setFen(fen: String): Unit =
+  def setFen(state: GuiViewState, fen: String): GuiViewState =
     Fen.parse(fen.trim) match
-      case Left(err) => info = Some(err)
+      case Left(err) => state.copy(infoMessage = Some(err))
       case Right(next) =>
-        currentGame = next
-        moveLog = Vector.empty
-        clearSelection()
-        info = Some("Position gesetzt.")
+        clearSelection(
+          state.copy(
+            game = next,
+            moveEntries = Vector.empty,
+            infoMessage = Some("Position gesetzt.")
+          )
+        )
 
-  private def select(pos: Pos): Unit =
-    selected = Some(pos)
-    legalTargets = legalMovesFrom(pos)
-    info = None
+  private def select(state: GuiViewState, pos: Pos): GuiViewState =
+    state.copy(
+      selectedPos = Some(pos),
+      legalTargetSquares = legalMovesFrom(state.game, pos),
+      infoMessage = None
+    )
 
-  private def clearSelection(): Unit =
-    selected = None
-    legalTargets = Set.empty
+  private def clearSelection(state: GuiViewState): GuiViewState =
+    state.copy(selectedPos = None, legalTargetSquares = Set.empty)
 
-  private def attemptMove(from: Pos, to: Pos): Unit =
-    val mover = currentGame.sideToMove
-    currentGame.applyMove(Move(from, to)) match
-      case Left(err) => info = Some(err)
+  private def attemptMove(state: GuiViewState, from: Pos, to: Pos): GuiViewState =
+    val mover = state.game.sideToMove
+    state.game.applyMove(Move(from, to)) match
+      case Left(err) => state.copy(infoMessage = Some(err))
       case Right(next) =>
-        currentGame = next
-        moveLog = moveLog :+ formatMove(mover, Move(from, to))
-        clearSelection()
-        if next.isCheckmate then info = Some(s"Schachmatt - ${colorLabel(mover)} gewinnt")
-        else if next.isInCheck then info = Some("Schach")
-        else info = None
+        val updated = clearSelection(
+          state.copy(
+            game = next,
+            moveEntries = state.moveEntries :+ formatMove(state.moveEntries, mover, Move(from, to))
+          )
+        )
+        if next.isCheckmate then updated.copy(infoMessage = Some(s"Schachmatt - ${colorLabel(mover)} gewinnt"))
+        else if next.isInCheck then updated.copy(infoMessage = Some("Schach"))
+        else updated.copy(infoMessage = None)
 
-  private def legalMovesFrom(from: Pos): Set[Pos] =
-    currentGame.legalMoves.collect { case Move(`from`, to) => to }.toSet
+  private def legalMovesFrom(game: Game, from: Pos): Set[Pos] =
+    game.legalMoves.collect { case Move(`from`, to) => to }.toSet
 
-  private def colorLabel(color: Color): String = color match
-    case Color.White => "White"
-    case Color.Black => "Black"
-
-  private def formatMove(mover: Color, move: Move): String =
+  private def formatMove(moveLog: Vector[String], mover: Color, move: Move): String =
     val moveNumber = moveLog.size / 2 + 1
     val side = mover match
       case Color.White => "W"
@@ -82,3 +88,7 @@ final class GuiViewAdapter(initialGame: Game = Game.initial):
 
   private def toAlg(pos: Pos): String =
     s"${('a' + pos.file).toChar}${pos.rank + 1}"
+
+  def colorLabel(color: Color): String = color match
+    case Color.White => "White"
+    case Color.Black => "Black"
