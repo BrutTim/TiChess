@@ -1,5 +1,7 @@
 package ch.tichess.model
 
+import scala.util.Using
+
 object Fen:
 
   private def pieceToChar(p: Piece): Char =
@@ -108,6 +110,14 @@ object Fen:
         _ <- validateKings(board)
       yield Game(board, sideToMove)
 
+  def parseFile(path: String): Either[String, Game] =
+    for
+      fen <- Using(scala.io.Source.fromFile(path))(_.mkString).toEither.left.map(err =>
+        s"Could not read FEN file: ${err.getMessage}"
+      )
+      game <- parse(fen)
+    yield game
+
   private def validateKings(board: Board): Either[String, Unit] =
     val whiteKings = board.allPieces.values.count(p => p.kind == PieceType.King && p.color == Color.White)
     val blackKings = board.allPieces.values.count(p => p.kind == PieceType.King && p.color == Color.Black)
@@ -121,4 +131,3 @@ object Fen:
       case Color.White => "w"
       case Color.Black => "b"
     s"$placement $side"
-

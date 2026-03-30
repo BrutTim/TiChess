@@ -1,5 +1,7 @@
 package ch.tichess.model
 
+import java.nio.file.Files
+
 import org.scalatest.funsuite.AnyFunSuite
 
 final class FenSpec extends AnyFunSuite:
@@ -69,3 +71,24 @@ final class FenSpec extends AnyFunSuite:
     assert(Fen.encode(game) == fen)
   }
 
+  test("Fen.parseFile loads a valid FEN via Try-based file handling") {
+    val file = Files.createTempFile("tichess-fen-", ".txt")
+    Files.writeString(file, initialFen)
+
+    assert(Fen.parseFile(file.toString) == Right(Game.initial))
+  }
+
+  test("Fen.parseFile reports IO errors through the error track") {
+    val missing = Files.createTempDirectory("tichess-missing-dir").resolve("missing.fen")
+    val result = Fen.parseFile(missing.toString)
+
+    assert(result.isLeft)
+    assert(result.left.toOption.exists(_.startsWith("Could not read FEN file:")))
+  }
+
+  test("Fen.parseFile keeps parse failures on the same two-track pipeline") {
+    val file = Files.createTempFile("tichess-invalid-fen-", ".txt")
+    Files.writeString(file, "not a fen")
+
+    assert(Fen.parseFile(file.toString) == Left("FEN side-to-move must be 'w' or 'b'."))
+  }
