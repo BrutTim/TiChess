@@ -47,8 +47,42 @@ object GuiMain extends JFXApp3:
       state = next
       refreshUi()
 
+    val promotionLabel = new Label {
+      style = "-fx-font-size: 13px; -fx-font-weight: bold; -fx-text-fill: #334155;"
+      visible = false
+      managed = false
+      text = "Promotion:"
+    }
+
+    def promotionButton(textValue: String, role: PromotionRole): Button =
+      new Button(textValue) {
+        visible = false
+        managed = false
+        onAction = _ => updateState(GuiViewAdapter.choosePromotion(state, role))
+      }
+
+    val queenButton = promotionButton("Dame", PromotionRole.Queen)
+    val rookButton = promotionButton("Turm", PromotionRole.Rook)
+    val bishopButton = promotionButton("Läufer", PromotionRole.Bishop)
+    val knightButton = promotionButton("Springer", PromotionRole.Knight)
+    val cancelPromotionButton = new Button("Abbrechen") {
+      visible = false
+      managed = false
+      onAction = _ => updateState(GuiViewAdapter.cancelPromotion(state))
+    }
+
     val (boardGrid, squares) = buildBoardGrid(updateState, () => state)
-    refreshUi = () => render(state, statusLabel, infoLabel, moveList, squares)
+    refreshUi = () =>
+      render(
+        state,
+        promotionLabel,
+        Seq(queenButton, rookButton, bishopButton, knightButton),
+        cancelPromotionButton,
+        statusLabel,
+        infoLabel,
+        moveList,
+        squares
+      )
 
     val setButton = new Button("Set") {
       onAction = _ =>
@@ -83,7 +117,22 @@ object GuiMain extends JFXApp3:
 
     val statusBar = new VBox {
       spacing = 4
-      children = Seq(statusLabel, infoLabel)
+      children = Seq(
+        new HBox {
+          spacing = 8
+          alignment = FxPos.CenterLeft
+          children = Seq(
+            promotionLabel,
+            queenButton,
+            rookButton,
+            bishopButton,
+            knightButton,
+            cancelPromotionButton
+          )
+        },
+        statusLabel,
+        infoLabel
+      )
     }
 
     stage = new JFXApp3.PrimaryStage {
@@ -173,6 +222,9 @@ object GuiMain extends JFXApp3:
 
   private def render(
       state: GuiViewState,
+      promotionLabel: Label,
+      promotionButtons: Seq[Button],
+      cancelPromotionButton: Button,
       statusLabel: Label,
       infoLabel: Label,
       moveList: ListView[String],
@@ -182,6 +234,16 @@ object GuiMain extends JFXApp3:
     val selected = state.selectedPos
     val legalTargets = state.legalTargetSquares
     val gameOver = state.isGameOver
+    val promotionPending = state.pendingPromotion.nonEmpty
+
+    promotionLabel.visible = promotionPending
+    promotionLabel.managed = promotionPending
+    promotionButtons.foreach { button =>
+      button.visible = promotionPending
+      button.managed = promotionPending
+    }
+    cancelPromotionButton.visible = promotionPending
+    cancelPromotionButton.managed = promotionPending
 
     squares.foreach { (pos, square) =>
       val pieceOpt = board.pieceAt(pos)
@@ -201,7 +263,7 @@ object GuiMain extends JFXApp3:
 
       square.container.style =
         s"-fx-background-color: $baseColor; -fx-border-color: $borderColor; -fx-border-width: $borderWidth;"
-      square.container.disable = gameOver
+      square.container.disable = gameOver || promotionPending
       square.targetMarker.visible = legalHere && pieceOpt.isEmpty
 
       pieceOpt match

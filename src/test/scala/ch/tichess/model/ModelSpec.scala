@@ -22,6 +22,14 @@ final class ModelSpec extends AnyFunSuite:
     assert(Pos(1, 2) + (2, 3) == Pos(3, 5))
   }
 
+  test("PieceType promotion parser accepts promotable roles and rejects others") {
+    assert(PromotionRole.fromPromotionChar("q") == Right(PromotionRole.Queen))
+    assert(PromotionRole.fromPromotionChar("R") == Right(PromotionRole.Rook))
+    assert(PromotionRole.fromPromotionChar("b") == Right(PromotionRole.Bishop))
+    assert(PromotionRole.fromPromotionChar("n") == Right(PromotionRole.Knight))
+    assert(PromotionRole.fromPromotionChar("k") == Left("Promotion must be one of: q, r, b, n."))
+  }
+
   test("Board.initial has 32 pieces and correct corners") {
     val b = Board.initial
     assert(b.allPieces.size == 32)
@@ -142,6 +150,17 @@ final class ModelSpec extends AnyFunSuite:
     assert(Rules.validateMove(bB, Color.Black, Move(Pos(4, 6), Pos(4, 7))) == Left("Illegal pawn move."))
   }
 
+  test("Promotion validation accepts promotable roles and rejects invalid promotion usage") {
+    val whitePawn = Board.empty.copy(pieces = Map(Pos(0, 6) -> Piece(Color.White, PieceType.Pawn)))
+    assert(Rules.validateMove(whitePawn, Color.White, Move(Pos(0, 6), Pos(0, 7), Some(PromotionRole.Queen))).isRight)
+
+    val rookBoard = Board.empty.copy(pieces = Map(Pos(0, 0) -> Piece(Color.White, PieceType.Rook)))
+    assert(
+      Rules.validateMove(rookBoard, Color.White, Move(Pos(0, 0), Pos(0, 7), Some(PromotionRole.Queen))) ==
+        Left("Promotion is only allowed for pawns reaching the back rank.")
+    )
+  }
+
   test("Game.applyMove applies move and flips side; rejects invalid") {
     val g0 = Game.initial
     val ok = g0.applyMove(Move(Pos(4, 1), Pos(4, 3))).toOption.get
@@ -149,6 +168,29 @@ final class ModelSpec extends AnyFunSuite:
 
     val bad = g0.applyMove(Move(Pos(4, 1), Pos(4, 7)))
     assert(bad.isLeft)
+  }
+
+  test("Game.applyMove promotes pawns, defaults to queen, and exposes all promotion roles in legalMoves") {
+    val board = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 6) -> Piece(Color.White, PieceType.Pawn),
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King),
+        Pos(0, 0) -> Piece(Color.White, PieceType.King)
+      )
+    )
+    val game = Game(board, Color.White)
+
+    val missingPromotion = game.applyMove(Move(Pos(4, 6), Pos(4, 7)))
+    assert(missingPromotion == Left("Promotion required: choose q, r, b, or n."))
+
+    val knightPromotion = game.applyMove(Move(Pos(4, 6), Pos(4, 7), Some(PromotionRole.Knight))).toOption.get
+    assert(knightPromotion.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Knight)))
+
+    val queenPromotion = game.applyMove(Move(Pos(4, 6), Pos(4, 7), Some(PromotionRole.Queen))).toOption.get
+    assert(queenPromotion.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Queen)))
+
+    val promotionMoves = game.legalMoves.filter(m => m.from == Pos(4, 6) && m.to == Pos(4, 7)).flatMap(_.promotion).toSet
+    assert(promotionMoves == PromotionRole.values.toSet)
   }
 
   test("Rules.isInCheck detects rook and knight attacks") {
@@ -326,4 +368,3 @@ final class ModelSpec extends AnyFunSuite:
     assert(!Rules.clearPath(b, Pos(0, 0), Pos(0, 3)))
     assert(Rules.findKing(Board.empty.copy(pieces = Map(Pos(3, 3) -> Piece(Color.White, PieceType.King))), Color.White).contains(Pos(3, 3)))
   }
-

@@ -9,6 +9,28 @@ enum Color:
 enum PieceType:
   case King, Queen, Rook, Bishop, Knight, Pawn
 
+enum PromotionRole:
+  case Queen, Rook, Bishop, Knight
+
+  def toPieceType: PieceType = this match
+    case PromotionRole.Queen  => PieceType.Queen
+    case PromotionRole.Rook   => PieceType.Rook
+    case PromotionRole.Bishop => PieceType.Bishop
+    case PromotionRole.Knight => PieceType.Knight
+
+object PieceType:
+  val promotableRoles: Set[PieceType] =
+    PromotionRole.values.map(_.toPieceType).toSet
+
+object PromotionRole:
+  def fromPromotionChar(s: String): Either[String, PromotionRole] =
+    s.toLowerCase match
+      case "q" => Right(PromotionRole.Queen)
+      case "r" => Right(PromotionRole.Rook)
+      case "b" => Right(PromotionRole.Bishop)
+      case "n" => Right(PromotionRole.Knight)
+      case _   => Left("Promotion must be one of: q, r, b, n.")
+
 final case class Piece(color: Color, kind: PieceType)
 
 final case class Pos(file: Int, rank: Int):
@@ -26,4 +48,4 @@ object Pos:
       val p = Pos(file, rank)
       if p.inBounds then Right(p) else Left("Position out of bounds.")
 
-final case class Move(from: Pos, to: Pos)
+final case class Move(from: Pos, to: Pos, promotion: Option[PromotionRole] = None)
