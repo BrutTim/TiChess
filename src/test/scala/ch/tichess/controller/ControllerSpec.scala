@@ -14,6 +14,8 @@ final class ControllerSpec extends AnyFunSuite:
 
   test("Command.parse parses move and rejects bad format") {
     assert(Command.parse("e2 e4").isRight)
+    assert(Command.parse("e7 e8 q") == Right(Command.MoveCmd(Move(Pos(4, 6), Pos(4, 7), Some(PromotionRole.Queen)))))
+    assert(Command.parse("e7 e8 k") == Left("Promotion must be one of: q, r, b, n."))
     assert(Command.parse("e2").isLeft)
     assert(Command.parse("e2 e9").isLeft)
     assert(Command.parse("e2  e4  ").isRight)
@@ -47,6 +49,7 @@ final class ControllerSpec extends AnyFunSuite:
     assert(help.game == g0)
     assert(help.message.contains(List(
                                       "- Zug eingeben: `e2 e4`",
+                                      "- Promotion: `e7 e8 q` (`q`, `r`, `b`, `n`)",
                                       "- Hilfe anzeigen: `help`",
                                       "- Spiel beenden: `quit`",
                                       "- Position setzen (FEN, minimal): `fen <placement> <w|b>`",
@@ -102,3 +105,35 @@ final class ControllerSpec extends AnyFunSuite:
     assert(res.message.exists(_.contains("FEN side-to-move must be 'w' or 'b'.")))
   }
 
+  test("Controller.update supports explicit promotion moves") {
+    val board = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 6) -> Piece(Color.White, PieceType.Pawn),
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King),
+        Pos(0, 0) -> Piece(Color.White, PieceType.King)
+      )
+    )
+    val game = Game(board, Color.White)
+
+    val res = Controller.update(game, "e7 e8 n")
+    assert(!res.quit)
+    assert(res.message.isEmpty)
+    assert(res.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Knight)))
+    assert(res.game.sideToMove == Color.Black)
+  }
+
+  test("Controller.update requires an explicit promotion choice in the TUI") {
+    val board = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 6) -> Piece(Color.White, PieceType.Pawn),
+        Pos(7, 7) -> Piece(Color.Black, PieceType.King),
+        Pos(0, 0) -> Piece(Color.White, PieceType.King)
+      )
+    )
+    val game = Game(board, Color.White)
+
+    val res = Controller.update(game, "e7 e8")
+    assert(!res.quit)
+    assert(res.game == game)
+    assert(res.message.contains("Promotion required: choose q, r, b, or n."))
+  }

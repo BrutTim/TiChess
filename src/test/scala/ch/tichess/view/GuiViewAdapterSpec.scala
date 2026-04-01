@@ -103,6 +103,11 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(updated.infoMessage.nonEmpty)
   }
 
+  test("choosePromotion keeps state unchanged when no promotion is pending") {
+    val initial = new GuiViewAdapter().initialState
+    assert(GuiViewAdapter.choosePromotion(initial, PromotionRole.Queen) == initial)
+  }
+
   test("attemptMove surfaces illegal target errors when state and target disagree") {
     val initial = new GuiViewAdapter().initialState
     val inconsistentState =
@@ -138,4 +143,46 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
 
     assert(afterMate.isGameOver)
     assert(afterMate.infoMessage.contains("Schachmatt - White gewinnt"))
+  }
+
+  test("promotion in GUI requires a choice and applies the selected role") {
+    val state = parseState("7k/4P3/8/8/8/8/8/K7 w")
+
+    val pending =
+      GuiViewAdapter.handleSquareClick(
+        GuiViewAdapter.handleSquareClick(state, Pos(4, 6)),
+        Pos(4, 7)
+      )
+
+    assert(pending.pendingPromotion.contains(PendingPromotion(Pos(4, 6), Pos(4, 7), Color.White)))
+    assert(pending.infoMessage.contains("Promotion wählen: Dame, Turm, Läufer oder Springer."))
+    assert(GuiViewAdapter.handleSquareClick(pending, Pos(0, 0)) == pending)
+
+    val promoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Knight)
+    assert(promoted.pendingPromotion.isEmpty)
+    assert(promoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Knight)))
+    assert(promoted.moveEntries.last.endsWith("=N"))
+
+    val cancelled = GuiViewAdapter.cancelPromotion(pending)
+    assert(cancelled.pendingPromotion.isEmpty)
+    assert(cancelled.infoMessage.isEmpty)
+  }
+
+  test("promotion choice covers queen rook bishop and rejects invalid roles") {
+    val pending = parseState("7k/4P3/8/8/8/8/8/K7 w").copy(
+      pendingPromotion = Some(PendingPromotion(Pos(4, 6), Pos(4, 7), Color.White)),
+      infoMessage = Some("Promotion wählen: Dame, Turm, Läufer oder Springer.")
+    )
+
+    val queenPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Queen)
+    assert(queenPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Queen)))
+    assert(queenPromoted.moveEntries.last.endsWith("=Q"))
+
+    val rookPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Rook)
+    assert(rookPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Rook)))
+    assert(rookPromoted.moveEntries.last.endsWith("=R"))
+
+    val bishopPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Bishop)
+    assert(bishopPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Bishop)))
+    assert(bishopPromoted.moveEntries.last.endsWith("=B"))
   }

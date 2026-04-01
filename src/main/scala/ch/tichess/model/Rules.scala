@@ -1,6 +1,20 @@
 package ch.tichess.model
 
 object Rules:
+  private def promotionRank(color: Color, rank: Int): Boolean =
+    (color == Color.White && rank == 7) || (color == Color.Black && rank == 0)
+
+  private def validatePromotion(piece: Piece, move: Move): Either[String, Unit] =
+    val reachesPromotionRank = piece.kind == PieceType.Pawn && promotionRank(piece.color, move.to.rank)
+
+    move.promotion match
+      case Some(_) if !reachesPromotionRank =>
+        Left("Promotion is only allowed for pawns reaching the back rank.")
+      case None if reachesPromotionRank =>
+        Right(())
+      case _ =>
+        Right(())
+
   private[model] def sign(x: Int): Int = if x == 0 then 0 else if x > 0 then 1 else -1
 
   private[model] def squaresBetweenExclusive(from: Pos, to: Pos): List[Pos] =
@@ -64,9 +78,13 @@ object Rules:
         case None => Left("No piece at source position.")
         case Some(piece) if piece.color != sideToMove => Left("Not your piece.")
         case Some(piece) =>
-          board.pieceAt(move.to) match
-            case Some(target) if target.color == sideToMove => Left("Cannot capture your own piece.")
-            case _ =>
+          for
+            _ <-
+              board.pieceAt(move.to) match
+                case Some(target) if target.color == sideToMove => Left("Cannot capture your own piece.")
+                case _                                          => Right(())
+            _ <- validatePromotion(piece, move)
+            _ <-
               val df = move.to.file - move.from.file
               val dr = move.to.rank - move.from.rank
               val absDf = Math.abs(df)
@@ -109,3 +127,4 @@ object Rules:
 
                   if oneForward || twoForward || captureDiag then Right(())
                   else Left("Illegal pawn move.")
+          yield ()
