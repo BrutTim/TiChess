@@ -30,6 +30,12 @@ object Command:
                   from <- Pos.fromAlgebraic(fromStr.toLowerCase)
                   to <- Pos.fromAlgebraic(toStr.toLowerCase)
                 yield Command.MoveCmd(Move(from, to))
+              case fromStr :: toStr :: promoStr :: Nil =>
+                for
+                  from <- Pos.fromAlgebraic(fromStr.toLowerCase)
+                  to <- Pos.fromAlgebraic(toStr.toLowerCase)
+                  promotion <- PromotionRole.fromPromotionChar(promoStr)
+                yield Command.MoveCmd(Move(from, to, Some(promotion)))
               case _ => Left("Expected a move like: e2 e4 (or 'help', 'quit', fen).")
 
 final case class UpdateResult(game: Game, message: Option[String], quit: Boolean)
@@ -47,6 +53,7 @@ object Controller:
       case Right(Command.Help) =>
         UpdateResult(game, Some(List(
                                       "- Zug eingeben: `e2 e4`",
+                                      "- Promotion: `e7 e8 q` (`q`, `r`, `b`, `n`)",
                                       "- Hilfe anzeigen: `help`",
                                       "- Spiel beenden: `quit`",
                                       "- Position setzen (FEN, minimal): `fen <placement> <w|b>`",
