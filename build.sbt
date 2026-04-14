@@ -1,7 +1,7 @@
 ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / organization := "ch.tichess"
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / coverageExcludedFiles := ".*GuiMain"
+ThisBuild / coverageExcludedFiles := ".*GuiMain|.*FastParseParsers.*"
 
 lazy val javaFxVersion = "21.0.2"
 lazy val osName = sys.props("os.name").toLowerCase
@@ -25,6 +25,8 @@ lazy val root = (project in file("."))
     name := "TiChess",
     libraryDependencies ++= Seq(
       "org.scalafx" %% "scalafx" % "21.0.0-R32",
+      "org.scala-lang.modules" %% "scala-parser-combinators" % "2.4.0",
+      "com.lihaoyi" %% "fastparse" % "3.1.1",
       "org.scalatest" %% "scalatest" % "3.2.19" % Test
     ) ++ javaFxModules.map(m => "org.openjfx" % s"javafx-$m" % javaFxVersion classifier javaFxPlatform),
     Test / fork := true

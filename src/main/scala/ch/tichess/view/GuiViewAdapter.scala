@@ -6,13 +6,20 @@ final case class PendingPromotion(from: Pos, to: Pos, color: Color)
 
 final case class GuiViewState(
     game: Game,
+    startGame: Game = Game.initial,
+    moveHistory: Vector[Move] = Vector.empty,
     selectedPos: Option[Pos] = None,
     legalTargetSquares: Set[Pos] = Set.empty,
     infoMessage: Option[String] = None,
     moveEntries: Vector[String] = Vector.empty,
-    pendingPromotion: Option[PendingPromotion] = None
+    pendingPromotion: Option[PendingPromotion] = None,
+    selectedParserId: String = NotationParsers.default.id,
+    notationText: String = ""
 ):
   def isGameOver: Boolean = game.isCheckmate
+
+  def parserChoice: ParserChoice =
+    NotationParsers.resolve(selectedParserId).getOrElse(NotationParsers.default)
 
   def statusText: String =
     if game.isCheckmate then s"Schachmatt - ${GuiViewAdapter.colorLabel(game.sideToMove.other)} gewinnt"
@@ -21,10 +28,10 @@ final case class GuiViewState(
       if game.isInCheck then s"$turn | Schach" else turn
 
 object GuiViewState:
-  val initial: GuiViewState = GuiViewState(Game.initial)
+  val initial: GuiViewState = GuiViewState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty)
 
 final class GuiViewAdapter(initialGame: Game = Game.initial):
-  def initialState: GuiViewState = GuiViewState(initialGame)
+  def initialState: GuiViewState = GuiViewState(initialGame, startGame = initialGame, moveHistory = Vector.empty)
 
 object GuiViewAdapter:
   def canSelect(state: GuiViewState, pos: Pos): Boolean =
@@ -42,18 +49,49 @@ object GuiViewAdapter:
           else if canSelect(state, pos) then select(state, pos)
           else state
 
+  def setParser(state: GuiViewState, parserId: String): GuiViewState =
+    NotationParsers.resolve(parserId) match
+      case Left(err) => state.copy(infoMessage = Some(err))
+      case Right(choice) =>
+        state.copy(selectedParserId = choice.id, infoMessage = Some(s"Parser gesetzt: ${choice.id}."))
+
   def setFen(state: GuiViewState, fen: String): GuiViewState =
-    Fen.parse(fen.trim) match
+    state.parserChoice.fenParser.parse(fen.trim) match
       case Left(err) => state.copy(infoMessage = Some(err))
       case Right(next) =>
         clearSelection(
           state.copy(
             game = next,
+            startGame = next,
+            moveHistory = Vector.empty,
             moveEntries = Vector.empty,
-            infoMessage = Some("Position gesetzt."),
-            pendingPromotion = None
+            infoMessage = Some(s"Position gesetzt mit ${state.parserChoice.id}."),
+            pendingPromotion = None,
+            notationText = fen.trim
           )
         )
+
+  def exportFen(state: GuiViewState): GuiViewState =
+    state.copy(notationText = Fen.encode(state.game), infoMessage = Some("FEN exportiert."))
+
+  def setPgn(state: GuiViewState, pgn: String): GuiViewState =
+    Pgn.parse(pgn.trim, state.parserChoice) match
+      case Left(err) => state.copy(infoMessage = Some(err))
+      case Right(imported) =>
+        clearSelection(
+          state.copy(
+            game = imported.game,
+            startGame = imported.startGame,
+            moveHistory = imported.moves,
+            moveEntries = buildMoveEntries(imported.startGame, imported.moves),
+            infoMessage = Some(s"PGN importiert mit ${state.parserChoice.id}."),
+            pendingPromotion = None,
+            notationText = pgn.trim
+          )
+        )
+
+  def exportPgn(state: GuiViewState): GuiViewState =
+    state.copy(notationText = Pgn.encode(state.startGame, state.moveHistory), infoMessage = Some("PGN exportiert."))
 
   def choosePromotion(state: GuiViewState, role: PromotionRole): GuiViewState =
     state.pendingPromotion match
@@ -97,6 +135,7 @@ object GuiViewAdapter:
         val updated = clearSelection(
           state.copy(
             game = next,
+            moveHistory = state.moveHistory :+ move,
             moveEntries = state.moveEntries :+ formatMove(state.moveEntries, mover, move, movingPiece, next.board),
             infoMessage = pendingInfo.orElse(state.infoMessage)
           )
@@ -130,6 +169,20 @@ object GuiViewAdapter:
           }
         case _ => ""
     s"$moveNumber. $side ${toAlg(move.from)}-${toAlg(move.to)}$promotionSuffix"
+
+  private[view] def buildMoveEntries(startGame: Game, moves: Vector[Move]): Vector[String] =
+    val (_, entries) =
+      moves.foldLeft((startGame, Vector.empty[String])) { case ((game, log), move) =>
+        val mover = game.sideToMove
+        val movingPiece = game.board.pieceAt(move.from)
+        game.applyMove(move) match
+          case Right(next) =>
+            val entry = formatMove(log, mover, move, movingPiece, next.board)
+            (next, log :+ entry)
+          case Left(_) =>
+            (game, log)
+      }
+    entries
 
   private def toAlg(pos: Pos): String =
     s"${('a' + pos.file).toChar}${pos.rank + 1}"

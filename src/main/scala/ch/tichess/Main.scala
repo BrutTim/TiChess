@@ -33,15 +33,14 @@ object ConsoleApp:
     override def writeLine(s: String): Unit = out(s)
 
   def run(io: IO): Unit =
-    loop(io, Controller.initial, None)
+    loop(io, Controller.initialState, None)
 
   @annotation.tailrec
-  private def loop(io: IO, game: ch.tichess.model.Game, message: Option[String]): Unit =
-    io.writeLine(ConsoleView.render(game, message))
+  private def loop(io: IO, state: ch.tichess.controller.AppState, message: Option[String]): Unit =
+    io.writeLine(ConsoleView.render(state.game, message))
     io.readLine() match
       case None => ()
       case Some(in) =>
-        val res = Controller.update(game, in)
+        val res = Controller.update(state, in)
         if res.quit then io.writeLine(ConsoleView.render(res.game, res.message))
-        else loop(io, res.game, res.message)
-
+        else loop(io, res.state, res.message)

@@ -7,88 +7,89 @@ import org.scalatest.funsuite.AnyFunSuite
 final class FenSpec extends AnyFunSuite:
 
   private val initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w"
+  private val fullInputError = "FEN must contain exactly placement and side-to-move."
 
-  test("Fen.encode(Game.initial) matches standard initial FEN (minimal subset)") {
+  private def parsers: List[FenParser] = FenParsers.all
+
+  private def assertSameAcrossParsers(input: String, expected: Either[String, Game]): Unit =
+    parsers.foreach { parser =>
+      assert(Fen.parseWith(parser, input) == expected, s"unexpected result for ${parser.name}")
+    }
+
+  test("Fen.encode(Game.initial) matches standard initial FEN") {
     assert(Fen.encode(Game.initial) == initialFen)
   }
 
-  test("Fen.parse accepts initial FEN and sets side-to-move") {
-    assert(Fen.parse(initialFen) == Right(Game.initial))
+  test("all parsers accept initial FEN and allow surrounding whitespace including newlines") {
+    assertSameAcrossParsers(initialFen, Right(Game.initial))
+    assertSameAcrossParsers(s"  \n$initialFen\t  ", Right(Game.initial))
 
-    val blackFen = initialFen.replace(" w", " b")
-    val parsedBlack = Fen.parse(blackFen).toOption.get
-    assert(parsedBlack.sideToMove == Color.Black)
-    assert(parsedBlack.board.allPieces.size == 32)
+    val blackFen = initialFen.replace(" w", "\n b")
+    val parsedBlack = parsers.map(parser => Fen.parseWith(parser, blackFen).toOption.get)
+    assert(parsedBlack.forall(_.sideToMove == Color.Black))
+    assert(parsedBlack.forall(_.board.allPieces.size == 32))
   }
 
-  test("Fen.parse rejects invalid side-to-move") {
-    assert(Fen.parse("8/8/8/8/8/8/8/4K3 x") == Left("FEN side-to-move must be 'w' or 'b'."))
+  test("all parsers reject missing or extra input instead of leaving rest") {
+    assertSameAcrossParsers("8/8/8/8/8/8/8/8", Left(fullInputError))
+    assertSameAcrossParsers("8/8/8/8/8/8/8/4K3 w extra", Left(fullInputError))
+    assertSameAcrossParsers("not a fen", Left(fullInputError))
   }
 
-  test("Fen.parsePlacement rejects wrong number of ranks") {
-    assert(Fen.parse("8/8/8/8/8/8/8/8") == Left("FEN must contain at least placement and side-to-move."))
-    assert(Fen.parse("8/8/8/8/8/8/8 w 0 1") == Left("FEN placement must have 8 ranks separated by '/'."))
+  test("all parsers produce the same semantic validation errors") {
+    val cases = List(
+      "8/8/8/8/8/8/8/4K3 x" -> Left("FEN side-to-move must be 'w' or 'b'."),
+      "8/8/8/8/8/8/8 w" -> Left("FEN placement must have 8 ranks separated by '/'."),
+      "9/8/8/8/8/8/8/4K2 w" -> Left("FEN digit must be 1..8."),
+      "4k3/8/8/8/8/8/8/8 w" -> Left("FEN must contain exactly one white king."),
+      "18/4k3/8/8/8/8/8/4K3 w" -> Left("FEN rank has too many squares."),
+      "8K/4k3/8/8/8/8/8/4K3 w" -> Left("FEN rank has too many squares."),
+      "7/4k3/8/8/8/8/8/4K3 w" -> Left("FEN rank does not cover exactly 8 squares."),
+      "8/8/8/8/8/8/8/4.3 w" -> Left("Invalid piece character."),
+      "8/8/8/8/8/8/8/4X3 w" -> Left("Invalid piece character."),
+      "k6k/8/8/8/8/8/8/4K3 w" -> Left("FEN must contain exactly one black king."))
+
+    cases.foreach { (input, expected) =>
+      assertSameAcrossParsers(input, expected)
+    }
   }
 
-  test("Fen.parsePlacement rejects invalid digits and missing kings") {
-    assert(Fen.parse("9/8/8/8/8/8/8/4K2 w") == Left("FEN digit must be 1..8."))
-    assert(Fen.parse("4k3/8/8/8/8/8/8/8 w") == Left("FEN must contain exactly one white king."))
+  test("Fen.encode round-trips a position with mixed empty runs and black to move") {
+    val fen = "8/8/8/8/8/3k4/8/KR6 b"
+    val games = parsers.map(parser => Fen.parseWith(parser, fen).toOption.get)
+
+    assert(games.distinct.size == 1)
+    assert(games.forall(game => Fen.encode(game) == fen))
   }
 
-  test("Fen.encode also supports side-to-move black") {
-    val blackFen = initialFen.replace(" w", " b")
-    val parsedBlack = Fen.parse(blackFen).toOption.get
-    assert(Fen.encode(parsedBlack) == blackFen)
+  test("Fen.parse delegates to the default parser and parseWith exposes individual implementations") {
+    val expected = Right(Game.initial)
+
+    assert(Fen.parse(initialFen) == expected)
+    assert(Fen.parseWith(Fen.defaultParser, initialFen) == expected)
+    assert(parsers.map(parser => Fen.parseWith(parser, initialFen)).distinct == List(expected))
   }
 
-  test("Fen.parsePlacement rejects ranks with too many squares / too few squares") {
-    // rank8: "18" => 1 empty + 8 empty => 9 squares -> overflow
-    assert(Fen.parse("18/4k3/8/8/8/8/8/4K3 w") == Left("FEN rank has too many squares."))
-
-    // rank8: "8K" => 8 empties then a piece => overflow (file > 7)
-    assert(Fen.parse("8K/4k3/8/8/8/8/8/4K3 w") == Left("FEN rank has too many squares."))
-
-    // rank8: "7" => only 7 squares covered
-    assert(Fen.parse("7/4k3/8/8/8/8/8/4K3 w") == Left("FEN rank does not cover exactly 8 squares."))
-  }
-
-  test("Fen.parsePlacement rejects invalid piece characters") {
-    // '.' is neither upper nor lower => charToPiece color branch error
-    assert(Fen.parse("8/8/8/8/8/8/8/4.3 w") == Left("Invalid piece character."))
-
-    // 'X' is upper => color ok, but kind invalid
-    assert(Fen.parse("8/8/8/8/8/8/8/4X3 w") == Left("Invalid piece character."))
-  }
-
-  test("Fen.parsePlacement rejects multiple kings for a side") {
-    // two black kings, one white king
-    assert(Fen.parse("k6k/8/8/8/8/8/8/4K3 w") == Left("FEN must contain exactly one black king."))
-  }
-
-  test("Fen.encode covers emptyCount>0 and emptyCount==0 branches") {
-    val fen = "8/8/8/8/8/3k4/8/KR6 w"
-    val game = Fen.parse(fen).toOption.get
-    assert(Fen.encode(game) == fen)
-  }
-
-  test("Fen.parseFile loads a valid FEN via Try-based file handling") {
+  test("Fen.parseFile loads valid FEN for the default parser and parseFileWith works for all parser variants") {
     val file = Files.createTempFile("tichess-fen-", ".txt")
-    Files.writeString(file, initialFen)
+    Files.writeString(file, s"\n$initialFen\n")
 
     assert(Fen.parseFile(file.toString) == Right(Game.initial))
+    parsers.foreach { parser =>
+      assert(Fen.parseFileWith(parser, file.toString) == Right(Game.initial), s"unexpected file parse for ${parser.name}")
+    }
   }
 
-  test("Fen.parseFile reports IO errors through the error track") {
+  test("Fen.parseFile and parseFileWith report IO and parse failures on the Either error track") {
     val missing = Files.createTempDirectory("tichess-missing-dir").resolve("missing.fen")
-    val result = Fen.parseFile(missing.toString)
+    val invalid = Files.createTempFile("tichess-invalid-fen-", ".txt")
+    Files.writeString(invalid, "not a fen")
 
-    assert(result.isLeft)
-    assert(result.left.toOption.exists(_.startsWith("Could not read FEN file:")))
-  }
+    val ioResult = Fen.parseFile(missing.toString)
+    assert(ioResult.isLeft)
+    assert(ioResult.left.toOption.exists(_.startsWith("Could not read FEN file:")))
 
-  test("Fen.parseFile keeps parse failures on the same two-track pipeline") {
-    val file = Files.createTempFile("tichess-invalid-fen-", ".txt")
-    Files.writeString(file, "not a fen")
-
-    assert(Fen.parseFile(file.toString) == Left("FEN side-to-move must be 'w' or 'b'."))
+    parsers.foreach { parser =>
+      assert(Fen.parseFileWith(parser, invalid.toString) == Left(fullInputError), s"unexpected invalid file result for ${parser.name}")
+    }
   }
