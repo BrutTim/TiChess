@@ -76,11 +76,14 @@ object Controller:
   def update(game: Game, input: String): UpdateResult =
     update(AppState(game), input)
 
-  def update(state: AppState, input: String): UpdateResult =
+  import scala.concurrent.{Future, ExecutionContext}
+  import ch.tichess.services.ModelService
+
+  def updateAsync(state: AppState, input: String, modelService: ModelService)(implicit ec: ExecutionContext): Future[UpdateResult] =
     Command.parse(input) match
-      case Left(err) => UpdateResult(state, Some(err), quit = false)
+      case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
       case Right(Command.Help) =>
-        UpdateResult(state, Some(List(
+        Future.successful(UpdateResult(state, Some(List(
                                       "- Zug eingeben: `e2 e4`",
                                       "- Promotion: `e7 e8 q` (`q`, `r`, `b`, `n`)",
                                       "- Hilfe anzeigen: `help`",
@@ -92,11 +95,11 @@ object Controller:
                                       "- PGN importieren: `pgn import <pgn>`",
                                       "- PGN exportieren: `pgn export`",
                                       "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
-                                    ).mkString("\n")), quit = false)
+                                    ).mkString("\n")), quit = false))
       case Right(Command.Quit) =>
-        UpdateResult(state, Some("Bye."), quit = true)
+        Future.successful(UpdateResult(state, Some("Bye."), quit = true))
       case Right(Command.MoveCmd(mv)) =>
-        state.game.applyMove(mv) match
+        modelService.applyMove(state.game, mv).map {
           case Left(err)     => UpdateResult(state, Some(err), quit = false)
           case Right(nextGm) =>
             val nextState = state.copy(game = nextGm, moveHistory = state.moveHistory :+ mv)
@@ -104,20 +107,21 @@ object Controller:
               val winner = colorLabel(nextGm.sideToMove.other)
               UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
             else UpdateResult(nextState, None, quit = false)
+        }
       case Right(Command.ImportFenCmd(fenStr)) =>
         state.parserChoice.fenParser.parse(fenStr) match
-          case Left(err) => UpdateResult(state, Some(err), quit = false)
+          case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
           case Right(newGame) =>
             val nextState = state.copy(game = newGame, startGame = newGame, moveHistory = Vector.empty)
             if newGame.isCheckmate then
               val winner = colorLabel(newGame.sideToMove.other)
-              UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
-            else UpdateResult(nextState, Some(s"Position set using ${state.parserChoice.id}."), quit = false)
+              Future.successful(UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true))
+            else Future.successful(UpdateResult(nextState, Some(s"Position set using ${state.parserChoice.id}."), quit = false))
       case Right(Command.ExportFenCmd) =>
-        UpdateResult(state, Some(Fen.encode(state.game)), quit = false)
+        Future.successful(UpdateResult(state, Some(Fen.encode(state.game)), quit = false))
       case Right(Command.ImportPgnCmd(pgnStr)) =>
         Pgn.parse(pgnStr, state.parserChoice) match
-          case Left(err) => UpdateResult(state, Some(err), quit = false)
+          case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
           case Right(imported) =>
             val nextState = state.copy(
               game = imported.game,
@@ -126,14 +130,20 @@ object Controller:
             )
             if imported.game.isCheckmate then
               val winner = colorLabel(imported.game.sideToMove.other)
-              UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
-            else UpdateResult(nextState, Some(s"PGN imported using ${state.parserChoice.id}."), quit = false)
+              Future.successful(UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true))
+            else Future.successful(UpdateResult(nextState, Some(s"PGN imported using ${state.parserChoice.id}."), quit = false))
       case Right(Command.ExportPgnCmd) =>
-        UpdateResult(state, Some(Pgn.encode(state.startGame, state.moveHistory)), quit = false)
+        Future.successful(UpdateResult(state, Some(Pgn.encode(state.startGame, state.moveHistory)), quit = false))
       case Right(Command.ShowParserCmd) =>
-        UpdateResult(state, Some(parserSummary(state.parserChoice)), quit = false)
+        Future.successful(UpdateResult(state, Some(parserSummary(state.parserChoice)), quit = false))
       case Right(Command.SetParserCmd(parserId)) =>
         NotationParsers.resolve(parserId) match
-          case Left(err) => UpdateResult(state, Some(err), quit = false)
+          case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
           case Right(choice) =>
-            UpdateResult(state.copy(parserChoice = choice), Some(s"Parser set to ${choice.id}."), quit = false)
+            Future.successful(UpdateResult(state.copy(parserChoice = choice), Some(s"Parser set to ${choice.id}."), quit = false))
+
+  def update(state: AppState, input: String): UpdateResult =
+    import scala.concurrent.Await
+    import scala.concurrent.duration.*
+    implicit val ec: ExecutionContext = ExecutionContext.global
+    Await.result(updateAsync(state, input, new ch.tichess.services.LocalModelService()), 5.seconds)

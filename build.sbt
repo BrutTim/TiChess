@@ -27,7 +27,11 @@ lazy val root = (project in file("."))
       "org.scalafx" %% "scalafx" % "21.0.0-R32",
       "org.scala-lang.modules" %% "scala-parser-combinators" % "2.4.0",
       "com.lihaoyi" %% "fastparse" % "3.1.1",
-      "org.scalatest" %% "scalatest" % "3.2.19" % Test
+      "org.scalatest" %% "scalatest" % "3.2.19" % Test,
+      "com.typesafe.akka" %% "akka-actor-typed" % "2.8.5",
+      "com.typesafe.akka" %% "akka-stream" % "2.8.5",
+      "com.typesafe.akka" %% "akka-http" % "10.5.3",
+      "com.typesafe.akka" %% "akka-http-spray-json" % "10.5.3"
     ) ++ javaFxModules.map(m => "org.openjfx" % s"javafx-$m" % javaFxVersion classifier javaFxPlatform),
     Test / fork := true
   )
