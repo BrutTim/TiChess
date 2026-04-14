@@ -20,7 +20,8 @@ private[ch] object PgnSupport:
   private val moveNumberPattern = raw"\d+\.+".r
   private val moveTokenPattern = raw"([a-h][1-8])[-]?([a-h][1-8])(?:=?([qrbnQRBN]))?".r
 
-  def encode(startGame: Game, moves: Vector[Move], result: String = "*"): String =
+  def encode(startGame: Game, moves: Vector[Move], result: Option[String] = None): String =
+    val effectiveResult = result.getOrElse(inferResult(startGame, moves))
     val today = java.time.LocalDate.now()
     val baseTags = Vector(
       "Event" -> "TiChess Game",
@@ -29,14 +30,14 @@ private[ch] object PgnSupport:
       "Round" -> "-",
       "White" -> "White",
       "Black" -> "Black",
-      "Result" -> result
+      "Result" -> effectiveResult
     )
     val setupTags =
       if startGame == Game.initial then Vector.empty
       else Vector("SetUp" -> "1", "FEN" -> Fen.encode(startGame))
 
     val tagBlock = (baseTags ++ setupTags).map { (key, value) => s"""[$key "${escape(value)}"]""" }.mkString("\n")
-    s"$tagBlock\n\n${renderMoves(moves, result)}"
+    s"$tagBlock\n\n${renderMoves(moves, effectiveResult)}"
 
   def buildImportedPgn(raw: RawPgn, fenParser: FenParser): Either[String, ImportedPgn] =
     for
@@ -56,6 +57,15 @@ private[ch] object PgnSupport:
     moves.foldLeft(Right(startGame): Either[String, Game]) { (gameE, move) =>
       gameE.flatMap(_.applyMove(move))
     }
+
+  private def inferResult(startGame: Game, moves: Vector[Move]): String =
+    replayMoves(startGame, moves) match
+      case Right(finalGame) if finalGame.isCheckmate =>
+        finalGame.sideToMove.other match
+          case Color.White => "1-0"
+          case Color.Black => "0-1"
+      case _ =>
+        "*"
 
   private def extractStartGame(tags: Map[String, String], fenParser: FenParser): Either[String, Game] =
     val maybeFen = tags.get("FEN").orElse(tags.get("Fen"))
@@ -238,7 +248,7 @@ object NotationParsers:
       case None => Left(s"Unknown parser '$input'. Available parsers: ${ids.mkString(", ")}.")
 
 object Pgn:
-  def encode(startGame: Game, moves: Vector[Move], result: String = "*"): String =
+  def encode(startGame: Game, moves: Vector[Move], result: Option[String] = None): String =
     PgnSupport.encode(startGame, moves, result)
 
   def parse(pgn: String, parserChoice: ParserChoice = NotationParsers.default): Either[String, ImportedPgn] =

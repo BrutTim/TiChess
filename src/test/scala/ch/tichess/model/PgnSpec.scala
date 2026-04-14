@@ -43,6 +43,30 @@ final class PgnSpec extends AnyFunSuite:
     assert(!exported.contains("[SetUp "))
   }
 
+  test("PGN export sets result to 1-0 or 0-1 on checkmate instead of '*'") {
+    val whiteMateMoves = Vector(
+      Move(Pos(4, 1), Pos(4, 3)),
+      Move(Pos(5, 6), Pos(5, 5)),
+      Move(Pos(3, 1), Pos(3, 2)),
+      Move(Pos(6, 6), Pos(6, 4)),
+      Move(Pos(3, 0), Pos(7, 4))
+    )
+    val blackMateMoves = Vector(
+      Move(Pos(5, 1), Pos(5, 2)),
+      Move(Pos(4, 6), Pos(4, 4)),
+      Move(Pos(6, 1), Pos(6, 3)),
+      Move(Pos(3, 7), Pos(7, 3))
+    )
+
+    val whiteWin = Pgn.encode(Game.initial, whiteMateMoves)
+    val blackWin = Pgn.encode(Game.initial, blackMateMoves)
+
+    assert(whiteWin.contains("""[Result "1-0"]"""))
+    assert(whiteWin.trim.endsWith("1-0"))
+    assert(blackWin.contains("""[Result "0-1"]"""))
+    assert(blackWin.trim.endsWith("0-1"))
+  }
+
   test("PGN export includes FEN only for non-standard starting positions and still round-trips") {
     val customStart = Fen.parse("4k3/8/8/8/8/8/4P3/4K3 w").toOption.get
     val customMoves = Vector(Move(Pos(4, 1), Pos(4, 3)))
