@@ -170,7 +170,7 @@ object GuiViewAdapter:
         case _ => ""
     s"$moveNumber. $side ${toAlg(move.from)}-${toAlg(move.to)}$promotionSuffix"
 
-  private def buildMoveEntries(startGame: Game, moves: Vector[Move]): Vector[String] =
+  private[view] def buildMoveEntries(startGame: Game, moves: Vector[Move]): Vector[String] =
     val (_, entries) =
       moves.foldLeft((startGame, Vector.empty[String])) { case ((game, log), move) =>
         val mover = game.sideToMove

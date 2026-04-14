@@ -159,23 +159,6 @@ object ParserCombinatorsFenParser extends RegexParsers with FenParser:
       case Success(raw, _) => FenSupport.buildGame(raw)
       case _ => Left(FenSupport.FieldError)
 
-object FastParseFenParser extends FenParser:
-  override val name: String = "FastParse"
-
-  private def rawFen[$: P]: P[RawFen] =
-    P(
-      CharsWhileIn(" \t\r\n").rep ~
-        CharsWhile(ch => !ch.isWhitespace, min = 1).! ~
-        CharsWhileIn(" \t\r\n").rep(1) ~
-        CharsWhile(ch => !ch.isWhitespace, min = 1).! ~
-        CharsWhileIn(" \t\r\n").rep ~
-        End
-    ).map { case (placement, side) => RawFen(placement, side) }
-
-  def parse(fen: String): Either[String, Game] =
-    fastparse.parse(fen, rawFen(_)) match
-      case Parsed.Success(raw, _) => FenSupport.buildGame(raw)
-      case _: Parsed.Failure => Left(FenSupport.FieldError)
 
 object RegexFenParser extends FenParser:
   override val name: String = "regex/manual"

@@ -25,7 +25,11 @@ final class ControllerSpec extends AnyFunSuite:
   test("Command.parse handles fen command and rejects missing payload") {
     assert(Command.parse("fen").left.exists(_.contains("Expected a FEN")))
     assert(Command.parse("fen   ").left.exists(_.contains("Expected a FEN")))
+    assert(Command.parse("pgn").left.exists(_.contains("Expected a PGN")))
     assert(Command.parse("fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w") == Right(Command.ImportFenCmd("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w")))
+    assert(Command.parse("fen import rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w") == Right(Command.ImportFenCmd("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w")))
+    assert(Command.parse("fen import") == Right(Command.ImportFenCmd("import")))
+    assert(Command.parse("fen importX") == Right(Command.ImportFenCmd("importX")))
     assert(Command.parse("fen export") == Right(Command.ExportFenCmd))
     assert(Command.parse("pgn export") == Right(Command.ExportPgnCmd))
     assert(Command.parse("""pgn import 1. e2e4 *""").isRight)
@@ -139,6 +143,24 @@ final class ControllerSpec extends AnyFunSuite:
     assert(imported.message.contains("Checkmate. Black wins."))
     assert(imported.game.isCheckmate)
     assert(imported.state.moveHistory.size == 4)
+
+    val nonMatePgn = """1. e2e4 e7e5 *"""
+    val importedNonMate = Controller.update(parserSet.state, s"pgn import $nonMatePgn")
+    assert(!importedNonMate.quit)
+    assert(importedNonMate.message.contains("PGN imported using regex."))
+    assert(importedNonMate.state.moveHistory.size == 2)
+  }
+
+  test("Controller.update reports parser selection and PGN import errors without changing state") {
+    val initial = Controller.initialState
+
+    val badParser = Controller.update(initial, "parser unknown")
+    assert(badParser.state == initial)
+    assert(badParser.message.exists(_.contains("Unknown parser")))
+
+    val badPgn = Controller.update(initial, "pgn import 1. e4 *")
+    assert(badPgn.state == initial)
+    assert(badPgn.message.contains("Invalid PGN movetext."))
   }
 
   test("Controller.update supports explicit promotion moves") {

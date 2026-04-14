@@ -132,6 +132,18 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(imported.infoMessage.contains("PGN importiert mit regex."))
   }
 
+  test("GUI reports invalid parser ids and invalid PGN without changing the game") {
+    val initial = new GuiViewAdapter().initialState
+
+    val badParser = GuiViewAdapter.setParser(initial, "wat")
+    assert(badParser.game == initial.game)
+    assert(badParser.infoMessage.exists(_.contains("Unknown parser")))
+
+    val badPgn = GuiViewAdapter.setPgn(initial, "1. e4 *")
+    assert(badPgn.game == initial.game)
+    assert(badPgn.infoMessage.contains("Invalid PGN movetext."))
+  }
+
   test("choosePromotion keeps state unchanged when no promotion is pending") {
     val initial = new GuiViewAdapter().initialState
     assert(GuiViewAdapter.choosePromotion(initial, PromotionRole.Queen) == initial)
@@ -214,4 +226,11 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     val bishopPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Bishop)
     assert(bishopPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Bishop)))
     assert(bishopPromoted.moveEntries.last.endsWith("=B"))
+  }
+
+  test("buildMoveEntries silently ignores invalid moves") {
+    val game = Game.initial
+    val badMove = Move(Pos(4, 1), Pos(4, 5)) // e2 to e6, illegal for pawn
+    val entries = GuiViewAdapter.buildMoveEntries(game, Vector(badMove))
+    assert(entries.isEmpty)
   }
