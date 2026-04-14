@@ -27,12 +27,14 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
 
     assert(afterWhiteMove.game.sideToMove == Color.Black)
     assert(afterWhiteMove.moveEntries.last == "1. W e2-e4")
+    assert(afterWhiteMove.moveHistory == Vector(Move(Pos(4, 1), Pos(4, 3))))
 
     val afterBlackSelect = GuiViewAdapter.handleSquareClick(afterWhiteMove, Pos(4, 6)) // e7
     val afterBlackMove = GuiViewAdapter.handleSquareClick(afterBlackSelect, Pos(4, 4)) // e5
 
     assert(afterBlackMove.game.sideToMove == Color.White)
     assert(afterBlackMove.moveEntries.last == "1. B e7-e5")
+    assert(afterBlackMove.moveHistory == Vector(Move(Pos(4, 1), Pos(4, 3)), Move(Pos(4, 6), Pos(4, 4))))
   }
 
   test("setFen sets game state, clears move log and updates status on checkmate") {
@@ -52,7 +54,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(updated.isGameOver)
     assert(updated.statusText.contains("Schachmatt"))
     assert(updated.moveEntries.isEmpty)
-    assert(updated.infoMessage.contains("Position gesetzt."))
+    assert(updated.infoMessage.contains("Position gesetzt mit fastparse."))
   }
 
   test("status text reports normal turns, check, and black to move") {
@@ -101,6 +103,33 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(updated.legalTargetSquares == initial.legalTargetSquares)
     assert(updated.moveEntries == initial.moveEntries)
     assert(updated.infoMessage.nonEmpty)
+  }
+
+  test("GUI parser selection, FEN export, and PGN import/export use the selected parser") {
+    val initial = new GuiViewAdapter().initialState
+
+    val parserChanged = GuiViewAdapter.setParser(initial, "regex")
+    assert(parserChanged.selectedParserId == "regex")
+    assert(parserChanged.infoMessage.contains("Parser gesetzt: regex."))
+
+    val fenExported = GuiViewAdapter.exportFen(parserChanged)
+    assert(fenExported.notationText == Fen.encode(initial.game))
+    assert(fenExported.infoMessage.contains("FEN exportiert."))
+
+    val pgnExported = GuiViewAdapter.exportPgn(parserChanged)
+    assert(pgnExported.notationText.contains("[Result"))
+    assert(pgnExported.notationText.trim.endsWith("*"))
+    assert(pgnExported.infoMessage.contains("PGN exportiert."))
+
+    val imported = GuiViewAdapter.setPgn(
+      parserChanged,
+      "1. f2f3 e7e5 2. g2g4 d8h4 *"
+    )
+    assert(imported.game.isCheckmate)
+    assert(imported.selectedParserId == "regex")
+    assert(imported.moveEntries.nonEmpty)
+    assert(imported.moveHistory.size == 4)
+    assert(imported.infoMessage.contains("PGN importiert mit regex."))
   }
 
   test("choosePromotion keeps state unchanged when no promotion is pending") {

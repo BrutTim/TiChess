@@ -6,7 +6,7 @@ import scalafx.application.JFXApp3
 import scalafx.collections.ObservableBuffer
 import scalafx.geometry.{Insets, Pos as FxPos}
 import scalafx.scene.Scene
-import scalafx.scene.control.{Button, Label, ListView, TextField}
+import scalafx.scene.control.{Button, ChoiceBox, Label, ListView, TextArea, TextField}
 import scalafx.scene.layout.{BorderPane, GridPane, HBox, Priority, StackPane, VBox}
 import scalafx.scene.paint.Color as FxColor
 import scalafx.scene.shape.Circle
@@ -39,6 +39,17 @@ object GuiMain extends JFXApp3:
 
     val fenField = new TextField {
       promptText = "fen <placement> <w|b>"
+    }
+
+    val parserChoice = new ChoiceBox[String] {
+      items = ObservableBuffer.from(NotationParsers.ids)
+      value = state.selectedParserId
+    }
+
+    val notationArea = new TextArea {
+      promptText = "FEN oder PGN einfügen oder per Export erzeugen"
+      prefRowCount = 10
+      wrapText = true
     }
 
     var refreshUi: () => Unit = () => ()
@@ -81,6 +92,8 @@ object GuiMain extends JFXApp3:
         statusLabel,
         infoLabel,
         moveList,
+        parserChoice,
+        notationArea,
         squares
       )
 
@@ -89,15 +102,47 @@ object GuiMain extends JFXApp3:
         updateState(GuiViewAdapter.setFen(state, fenField.text.value))
     }
 
+    val exportFenButton = new Button("Export FEN") {
+      onAction = _ => updateState(GuiViewAdapter.exportFen(state))
+    }
+
+    val importPgnButton = new Button("Import PGN") {
+      onAction = _ => updateState(GuiViewAdapter.setPgn(state, notationArea.text.value))
+    }
+
+    val exportPgnButton = new Button("Export PGN") {
+      onAction = _ => updateState(GuiViewAdapter.exportPgn(state))
+    }
+
     fenField.onAction = _ =>
       updateState(GuiViewAdapter.setFen(state, fenField.text.value))
+
+    parserChoice.onAction = _ =>
+      Option(parserChoice.value.value).foreach { parserId =>
+        updateState(GuiViewAdapter.setParser(state, parserId))
+      }
 
     val fenRow = new HBox {
       spacing = 10
       alignment = FxPos.CenterLeft
-      children = Seq(new Label("FEN:"), fenField, setButton)
+      children = Seq(new Label("Parser:"), parserChoice, new Label("FEN:"), fenField, setButton, exportFenButton)
     }
     HBox.setHgrow(fenField, Priority.Always)
+
+    val notationPanel = new VBox {
+      spacing = 8
+      children = Seq(
+        new Label("Notation") {
+          style = "-fx-font-size: 14px; -fx-font-weight: bold;"
+        },
+        notationArea,
+        new HBox {
+          spacing = 10
+          alignment = FxPos.CenterLeft
+          children = Seq(importPgnButton, exportPgnButton)
+        }
+      )
+    }
 
     val movePanel = new VBox {
       spacing = 8
@@ -112,7 +157,7 @@ object GuiMain extends JFXApp3:
     val centerContent = new HBox {
       spacing = 18
       alignment = FxPos.TopLeft
-      children = Seq(boardGrid, movePanel)
+      children = Seq(boardGrid, movePanel, notationPanel)
     }
 
     val statusBar = new VBox {
@@ -228,6 +273,8 @@ object GuiMain extends JFXApp3:
       statusLabel: Label,
       infoLabel: Label,
       moveList: ListView[String],
+      parserChoice: ChoiceBox[String],
+      notationArea: TextArea,
       squares: Map[Pos, SquareNode]
   ): Unit =
     val board = state.game.board
@@ -284,6 +331,8 @@ object GuiMain extends JFXApp3:
     statusLabel.text = state.statusText
     infoLabel.text = state.infoMessage.getOrElse("")
     moveList.items = ObservableBuffer.from(state.moveEntries)
+    parserChoice.value = state.selectedParserId
+    if notationArea.text.value != state.notationText then notationArea.text = state.notationText
 
   private def pieceSymbol(piece: Piece): String =
     piece.kind match

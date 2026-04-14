@@ -4,7 +4,12 @@ import ch.tichess.model.*
 
 enum Command:
   case MoveCmd(move: Move)
-  case SetFenCmd(fen: String)
+  case ImportFenCmd(fen: String)
+  case ExportFenCmd
+  case ImportPgnCmd(pgn: String)
+  case ExportPgnCmd
+  case SetParserCmd(parserId: String)
+  case ShowParserCmd
   case Help
   case Quit
 
@@ -14,12 +19,21 @@ object Command:
     if trimmed.isEmpty then Left("Empty input.")
     else
       val lower = trimmed.toLowerCase
-      if lower.startsWith("fen") && lower.length > 3 && lower.charAt(3).isWhitespace then
-        val fenStr = trimmed.substring(3).trim
-        Right(Command.SetFenCmd(fenStr))
+      if lower == "fen export" then Right(Command.ExportFenCmd)
+      else if lower.startsWith("fen import") && lower.length > 10 && lower.charAt(10).isWhitespace then
+        Right(Command.ImportFenCmd(trimmed.substring(10).trim))
+      else if lower.startsWith("fen") && lower.length > 3 && lower.charAt(3).isWhitespace then
+        Right(Command.ImportFenCmd(trimmed.substring(3).trim))
+      else if lower == "pgn export" then Right(Command.ExportPgnCmd)
+      else if lower.startsWith("pgn import") && lower.length > 10 && lower.charAt(10).isWhitespace then
+        Right(Command.ImportPgnCmd(trimmed.substring(10).trim))
+      else if lower == "parser" then Right(Command.ShowParserCmd)
+      else if lower.startsWith("parser") && lower.length > 6 && lower.charAt(6).isWhitespace then
+        Right(Command.SetParserCmd(trimmed.substring(6).trim))
       else
         lower match
           case "fen" => Left("Expected a FEN after 'fen'.")
+          case "pgn" => Left("Expected a PGN after 'pgn import' or use 'pgn export'.")
           case "q" | "quit" | "exit" => Right(Command.Quit)
           case "h" | "help"          => Right(Command.Help)
           case _ =>
@@ -36,44 +50,90 @@ object Command:
                   to <- Pos.fromAlgebraic(toStr.toLowerCase)
                   promotion <- PromotionRole.fromPromotionChar(promoStr)
                 yield Command.MoveCmd(Move(from, to, Some(promotion)))
-              case _ => Left("Expected a move like: e2 e4 (or 'help', 'quit', fen).")
+              case _ => Left("Expected a move like: e2 e4 (or 'help', 'quit', fen, pgn, parser).")
 
-final case class UpdateResult(game: Game, message: Option[String], quit: Boolean)
+final case class AppState(
+    game: Game,
+    parserChoice: ParserChoice = NotationParsers.default,
+    startGame: Game = Game.initial,
+    moveHistory: Vector[Move] = Vector.empty
+)
+
+final case class UpdateResult(state: AppState, message: Option[String], quit: Boolean):
+  def game: Game = state.game
 
 object Controller:
   def initial: Game = Game.initial
+  def initialState: AppState = AppState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty)
 
   private def colorLabel(c: Color): String = c match
     case Color.White => "White"
     case Color.Black => "Black"
 
+  private def parserSummary(choice: ParserChoice): String =
+    s"Current parser: ${choice.id}. Available parsers: ${NotationParsers.ids.mkString(", ")}."
+
   def update(game: Game, input: String): UpdateResult =
+    update(AppState(game), input)
+
+  def update(state: AppState, input: String): UpdateResult =
     Command.parse(input) match
-      case Left(err) => UpdateResult(game, Some(err), quit = false)
+      case Left(err) => UpdateResult(state, Some(err), quit = false)
       case Right(Command.Help) =>
-        UpdateResult(game, Some(List(
+        UpdateResult(state, Some(List(
                                       "- Zug eingeben: `e2 e4`",
                                       "- Promotion: `e7 e8 q` (`q`, `r`, `b`, `n`)",
                                       "- Hilfe anzeigen: `help`",
                                       "- Spiel beenden: `quit`",
-                                      "- Position setzen (FEN, minimal): `fen <placement> <w|b>`",
-                                      "- Beispiel: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
+                                      "- Parser anzeigen: `parser`",
+                                      "- Parser setzen: `parser <fastparse|combinators|regex>`",
+                                      "- FEN importieren: `fen import <placement> <w|b>` oder `fen <placement> <w|b>`",
+                                      "- FEN exportieren: `fen export`",
+                                      "- PGN importieren: `pgn import <pgn>`",
+                                      "- PGN exportieren: `pgn export`",
+                                      "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
                                     ).mkString("\n")), quit = false)
       case Right(Command.Quit) =>
-        UpdateResult(game, Some("Bye."), quit = true)
+        UpdateResult(state, Some("Bye."), quit = true)
       case Right(Command.MoveCmd(mv)) =>
-        game.applyMove(mv) match
-          case Left(err)     => UpdateResult(game, Some(err), quit = false)
+        state.game.applyMove(mv) match
+          case Left(err)     => UpdateResult(state, Some(err), quit = false)
           case Right(nextGm) =>
+            val nextState = state.copy(game = nextGm, moveHistory = state.moveHistory :+ mv)
             if nextGm.isCheckmate then
               val winner = colorLabel(nextGm.sideToMove.other)
-              UpdateResult(nextGm, Some(s"Checkmate. $winner wins."), quit = true)
-            else UpdateResult(nextGm, None, quit = false)
-      case Right(Command.SetFenCmd(fenStr)) =>
-        ch.tichess.model.Fen.parse(fenStr) match
-          case Left(err) => UpdateResult(game, Some(err), quit = false)
+              UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
+            else UpdateResult(nextState, None, quit = false)
+      case Right(Command.ImportFenCmd(fenStr)) =>
+        state.parserChoice.fenParser.parse(fenStr) match
+          case Left(err) => UpdateResult(state, Some(err), quit = false)
           case Right(newGame) =>
+            val nextState = state.copy(game = newGame, startGame = newGame, moveHistory = Vector.empty)
             if newGame.isCheckmate then
               val winner = colorLabel(newGame.sideToMove.other)
-              UpdateResult(newGame, Some(s"Checkmate. $winner wins."), quit = true)
-            else UpdateResult(newGame, Some("Position set."), quit = false)
+              UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
+            else UpdateResult(nextState, Some(s"Position set using ${state.parserChoice.id}."), quit = false)
+      case Right(Command.ExportFenCmd) =>
+        UpdateResult(state, Some(Fen.encode(state.game)), quit = false)
+      case Right(Command.ImportPgnCmd(pgnStr)) =>
+        Pgn.parse(pgnStr, state.parserChoice) match
+          case Left(err) => UpdateResult(state, Some(err), quit = false)
+          case Right(imported) =>
+            val nextState = state.copy(
+              game = imported.game,
+              startGame = imported.startGame,
+              moveHistory = imported.moves
+            )
+            if imported.game.isCheckmate then
+              val winner = colorLabel(imported.game.sideToMove.other)
+              UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
+            else UpdateResult(nextState, Some(s"PGN imported using ${state.parserChoice.id}."), quit = false)
+      case Right(Command.ExportPgnCmd) =>
+        UpdateResult(state, Some(Pgn.encode(state.startGame, state.moveHistory)), quit = false)
+      case Right(Command.ShowParserCmd) =>
+        UpdateResult(state, Some(parserSummary(state.parserChoice)), quit = false)
+      case Right(Command.SetParserCmd(parserId)) =>
+        NotationParsers.resolve(parserId) match
+          case Left(err) => UpdateResult(state, Some(err), quit = false)
+          case Right(choice) =>
+            UpdateResult(state.copy(parserChoice = choice), Some(s"Parser set to ${choice.id}."), quit = false)

@@ -9,6 +9,7 @@ final class ControllerSpec extends AnyFunSuite:
     assert(Command.parse("quit") == Right(Command.Quit))
     assert(Command.parse("Q") == Right(Command.Quit))
     assert(Command.parse("help") == Right(Command.Help))
+    assert(Command.parse("parser") == Right(Command.ShowParserCmd))
     assert(Command.parse("  ") == Left("Empty input."))
   }
 
@@ -24,7 +25,11 @@ final class ControllerSpec extends AnyFunSuite:
   test("Command.parse handles fen command and rejects missing payload") {
     assert(Command.parse("fen").left.exists(_.contains("Expected a FEN")))
     assert(Command.parse("fen   ").left.exists(_.contains("Expected a FEN")))
-    assert(Command.parse("fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w").isRight)
+    assert(Command.parse("fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w") == Right(Command.ImportFenCmd("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w")))
+    assert(Command.parse("fen export") == Right(Command.ExportFenCmd))
+    assert(Command.parse("pgn export") == Right(Command.ExportPgnCmd))
+    assert(Command.parse("""pgn import 1. e2e4 *""").isRight)
+    assert(Command.parse("parser regex") == Right(Command.SetParserCmd("regex")))
   }
 
   test("Controller.update returns messages and updates game") {
@@ -52,8 +57,13 @@ final class ControllerSpec extends AnyFunSuite:
                                       "- Promotion: `e7 e8 q` (`q`, `r`, `b`, `n`)",
                                       "- Hilfe anzeigen: `help`",
                                       "- Spiel beenden: `quit`",
-                                      "- Position setzen (FEN, minimal): `fen <placement> <w|b>`",
-                                      "- Beispiel: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
+                                      "- Parser anzeigen: `parser`",
+                                      "- Parser setzen: `parser <fastparse|combinators|regex>`",
+                                      "- FEN importieren: `fen import <placement> <w|b>` oder `fen <placement> <w|b>`",
+                                      "- FEN exportieren: `fen export`",
+                                      "- PGN importieren: `pgn import <pgn>`",
+                                      "- PGN exportieren: `pgn export`",
+                                      "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
                                     ).mkString("\n")))
     assert(!help.quit)
 
@@ -85,7 +95,7 @@ final class ControllerSpec extends AnyFunSuite:
     val fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w"
     val res = Controller.update(Controller.initial, s"fen $fen")
     assert(!res.quit)
-    assert(res.message.contains("Position set."))
+    assert(res.message.contains("Position set using fastparse."))
     assert(res.game == Fen.parse(fen).toOption.get)
   }
 
@@ -103,6 +113,32 @@ final class ControllerSpec extends AnyFunSuite:
     assert(!res.quit)
     assert(res.game == Controller.initial)
     assert(res.message.exists(_.contains("FEN side-to-move must be 'w' or 'b'.")))
+  }
+
+  test("Controller parser selection persists in AppState and affects FEN/PGN workflows") {
+    val parserSet = Controller.update(Controller.initialState, "parser regex")
+    assert(parserSet.state.parserChoice.id == "regex")
+    assert(parserSet.message.contains("Parser set to regex."))
+
+    val show = Controller.update(parserSet.state, "parser")
+    assert(show.message.exists(_.contains("Current parser: regex.")))
+
+    val exportedFen = Controller.update(parserSet.state, "fen export")
+    assert(exportedFen.message.contains(Fen.encode(Controller.initial)))
+
+    val exportedPgn = Controller.update(
+      Controller.update(Controller.initialState, "e2 e4").state,
+      "pgn export"
+    )
+    assert(exportedPgn.message.exists(_.contains("1. e2e4 *")))
+    assert(exportedPgn.message.exists(msg => !msg.contains("[FEN ")))
+
+    val pgn = """1. f2f3 e7e5 2. g2g4 d8h4 *"""
+    val imported = Controller.update(parserSet.state, s"pgn import $pgn")
+    assert(imported.quit)
+    assert(imported.message.contains("Checkmate. Black wins."))
+    assert(imported.game.isCheckmate)
+    assert(imported.state.moveHistory.size == 4)
   }
 
   test("Controller.update supports explicit promotion moves") {
