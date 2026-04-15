@@ -284,12 +284,19 @@ object RestServer extends JsonSupport:
         pathPrefix("api" / "view") {
           get {
             path("game") {
-              val guiState = GuiViewState(appState.game)
+              val guiState = GuiViewState(appState.game, startGame = appState.startGame)
+              val adv = guiState.materialAdvantage
+              def capDisplay(pieces: List[ch.tichess.model.PieceType], showAdv: Boolean): String =
+                val symbols = pieces.map(capChar).mkString
+                val advStr = if showAdv then s" +${Math.abs(adv)}" else ""
+                if symbols.isEmpty && !showAdv then "" else s"$symbols$advStr"
               complete(StateResponse(
                 Fen.encode(appState.game),
                 guiState.statusText,
                 guiState.isGameOver,
-                appState.drawOfferedBy.nonEmpty
+                appState.drawOfferedBy.nonEmpty,
+                capDisplay(guiState.capturedByWhite, adv > 0),
+                capDisplay(guiState.capturedByBlack, adv < 0)
               ))
             }
           }

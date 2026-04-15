@@ -34,6 +34,34 @@ final case class GuiViewState(
       val drawNote = drawOfferedBy.map(c => s" | ${GuiViewAdapter.colorLabel(c)} bietet Remis an").getOrElse("")
       if game.isInCheck then s"$turn | Schach$drawNote" else s"$turn$drawNote"
 
+  private def pieceValue(kind: PieceType): Int = kind match
+    case PieceType.Pawn   => 1
+    case PieceType.Knight => 3
+    case PieceType.Bishop => 3
+    case PieceType.Rook   => 5
+    case PieceType.Queen  => 9
+    case PieceType.King   => 0
+
+  private def computeCaptured(opponentColor: Color): List[PieceType] =
+    val startPieces = startGame.board.allPieces.values.filter(_.color == opponentColor).toList
+    val currentPieces = game.board.allPieces.values.filter(_.color == opponentColor).toList
+    val startCounts = startPieces.groupBy(_.kind).view.mapValues(_.size).toMap
+    val currentCounts = currentPieces.groupBy(_.kind).view.mapValues(_.size).toMap
+    (startCounts.keySet ++ currentCounts.keySet).toList.flatMap { kind =>
+      val diff = startCounts.getOrElse(kind, 0) - currentCounts.getOrElse(kind, 0)
+      if diff > 0 then List.fill(diff)(kind) else Nil
+    }.sortBy(pieceValue)
+
+  /** Piece types White captured from Black, sorted by value ascending */
+  def capturedByWhite: List[PieceType] = computeCaptured(Color.Black)
+
+  /** Piece types Black captured from White, sorted by value ascending */
+  def capturedByBlack: List[PieceType] = computeCaptured(Color.White)
+
+  /** Positive = White leads, negative = Black leads */
+  def materialAdvantage: Int =
+    capturedByWhite.map(pieceValue).sum - capturedByBlack.map(pieceValue).sum
+
 object GuiViewState:
   val initial: GuiViewState = GuiViewState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty)
 

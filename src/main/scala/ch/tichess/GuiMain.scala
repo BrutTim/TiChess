@@ -92,6 +92,13 @@ object GuiMain extends JFXApp3:
       onAction = _ => updateState(GuiViewAdapter.drawAccept(state))
     }
 
+    val blackCapturedLabel = new Label {
+      style = "-fx-font-size: 18px;"
+    }
+    val whiteCapturedLabel = new Label {
+      style = "-fx-font-size: 18px;"
+    }
+
     val (boardGrid, squares) = buildBoardGrid(updateState, () => state)
     refreshUi = () =>
       render(
@@ -106,7 +113,9 @@ object GuiMain extends JFXApp3:
         moveList,
         parserChoice,
         notationArea,
-        squares
+        squares,
+        whiteCapturedLabel,
+        blackCapturedLabel
       )
 
     val setButton = new Button("Set") {
@@ -166,10 +175,15 @@ object GuiMain extends JFXApp3:
       )
     }
 
+    val boardWithCaptures = new VBox {
+      spacing = 4
+      children = Seq(blackCapturedLabel, boardGrid, whiteCapturedLabel)
+    }
+
     val centerContent = new HBox {
       spacing = 18
       alignment = FxPos.TopLeft
-      children = Seq(boardGrid, movePanel, notationPanel)
+      children = Seq(boardWithCaptures, movePanel, notationPanel)
     }
 
     val statusBar = new VBox {
@@ -294,7 +308,9 @@ object GuiMain extends JFXApp3:
       moveList: ListView[String],
       parserChoice: ChoiceBox[String],
       notationArea: TextArea,
-      squares: Map[Pos, SquareNode]
+      squares: Map[Pos, SquareNode],
+      whiteCapturedLabel: Label,
+      blackCapturedLabel: Label
   ): Unit =
     val board = state.game.board
     val selected = state.selectedPos
@@ -357,6 +373,23 @@ object GuiMain extends JFXApp3:
     moveList.items = ObservableBuffer.from(state.moveEntries)
     parserChoice.value = state.selectedParserId
     if notationArea.text.value != state.notationText then notationArea.text = state.notationText
+
+    val adv = state.materialAdvantage
+    whiteCapturedLabel.text = capturedDisplay(state.capturedByWhite, adv, adv > 0)
+    blackCapturedLabel.text = capturedDisplay(state.capturedByBlack, adv, adv < 0)
+
+  private def capturedDisplay(pieces: List[PieceType], advantage: Int, showAdv: Boolean): String =
+    val symbols = pieces.map(capturedPieceChar).mkString
+    val advStr = if showAdv then s"  +${Math.abs(advantage)}" else ""
+    if symbols.isEmpty && !showAdv then "" else s"$symbols$advStr"
+
+  private def capturedPieceChar(kind: PieceType): String = kind match
+    case PieceType.Pawn   => "♟"
+    case PieceType.Knight => "♞"
+    case PieceType.Bishop => "♝"
+    case PieceType.Rook   => "♜"
+    case PieceType.Queen  => "♛"
+    case PieceType.King   => "♚"
 
   private def pieceSymbol(piece: Piece): String =
     piece.kind match
