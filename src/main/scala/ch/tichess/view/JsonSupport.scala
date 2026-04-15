@@ -9,7 +9,7 @@ final case class ModelResponse(success: Boolean, fen: Option[String], error: Opt
 final case class CommandRequest(input: String)
 final case class CommandResponse(success: Boolean, message: Option[String], fen: Option[String], quit: Boolean)
 
-final case class StateResponse(fen: String, statusText: String, isGameOver: Boolean)
+final case class StateResponse(fen: String, statusText: String, isGameOver: Boolean, drawOffered: Boolean)
 
 trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
   implicit val moveRequestFormat: RootJsonFormat[MoveRequest] = jsonFormat2(MoveRequest.apply)
@@ -18,4 +18,4 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
   implicit val commandRequestFormat: RootJsonFormat[CommandRequest] = jsonFormat1(CommandRequest.apply)
   implicit val commandResponseFormat: RootJsonFormat[CommandResponse] = jsonFormat4(CommandResponse.apply)
   
-  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat3(StateResponse.apply)
+  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat4(StateResponse.apply)

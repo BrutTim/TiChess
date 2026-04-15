@@ -48,7 +48,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
       )
     assert(afterMove.moveEntries.nonEmpty)
 
-    val updated = GuiViewAdapter.setFen(afterMove, "k7/1Q6/2K5/8/8/8/8/8 b")
+    val updated = GuiViewAdapter.setFen(afterMove, "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1")
 
     assert(updated.game.isCheckmate)
     assert(updated.isGameOver)
@@ -68,7 +68,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
       )
     assert(afterWhiteMove.statusText == "Black to move")
 
-    val inCheck = parseState("4k3/8/8/8/8/8/4r3/4K3 w")
+    val inCheck = parseState("4k3/8/8/8/8/8/4r3/4K3 w - - 0 1")
     assert(inCheck.statusText == "White to move | Schach")
   }
 
@@ -90,7 +90,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(reselected.selectedPos.contains(Pos(3, 1)))
     assert(reselected.legalTargetSquares == Set(Pos(3, 2), Pos(3, 3)))
 
-    val gameOver = parseState("k7/1Q6/2K5/8/8/8/8/8 b")
+    val gameOver = parseState("k7/1Q6/2K5/8/8/8/8/8 b - - 0 1")
     assert(GuiViewAdapter.handleSquareClick(gameOver, Pos(0, 7)) == gameOver)
   }
 
@@ -165,7 +165,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
   }
 
   test("successful moves can announce check and checkmate") {
-    val checkingState = parseState("4k3/8/8/8/8/8/4R3/4K3 w")
+    val checkingState = parseState("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1")
     val afterCheck =
       GuiViewAdapter.handleSquareClick(
         GuiViewAdapter.handleSquareClick(checkingState, Pos(4, 1)),
@@ -175,7 +175,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(afterCheck.infoMessage.contains("Schach"))
     assert(afterCheck.game.sideToMove == Color.Black)
 
-    val matingState = parseState("k7/8/1QK5/8/8/8/8/8 w")
+    val matingState = parseState("k7/8/1QK5/8/8/8/8/8 w - - 0 1")
     val afterMate =
       GuiViewAdapter.handleSquareClick(
         GuiViewAdapter.handleSquareClick(matingState, Pos(1, 5)),
@@ -187,7 +187,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
   }
 
   test("promotion in GUI requires a choice and applies the selected role") {
-    val state = parseState("7k/4P3/8/8/8/8/8/K7 w")
+    val state = parseState("7k/4P3/8/8/8/8/8/K7 w - - 0 1")
 
     val pending =
       GuiViewAdapter.handleSquareClick(
@@ -210,7 +210,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
   }
 
   test("promotion choice covers queen rook bishop and rejects invalid roles") {
-    val pending = parseState("7k/4P3/8/8/8/8/8/K7 w").copy(
+    val pending = parseState("7k/4P3/8/8/8/8/8/K7 w - - 0 1").copy(
       pendingPromotion = Some(PendingPromotion(Pos(4, 6), Pos(4, 7), Color.White)),
       infoMessage = Some("Promotion wählen: Dame, Turm, Läufer oder Springer.")
     )

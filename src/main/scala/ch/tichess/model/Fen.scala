@@ -11,7 +11,14 @@ trait FenParser:
   def name: String
   def parse(fen: String): Either[String, Game]
 
-private[ch] final case class RawFen(placement: String, side: String)
+private[ch] final case class RawFen(
+  placement: String, 
+  side: String,
+  castling: Option[String] = None,
+  enPassant: Option[String] = None,
+  halfMove: Option[String] = None,
+  fullMove: Option[String] = None
+)
 
 private[ch] object FenSupport:
   val FieldError = "FEN must contain exactly placement and side-to-move."
@@ -36,18 +43,27 @@ private[ch] object FenSupport:
         case "b" => Right(Color.Black)
         case _ => Left("FEN side-to-move must be 'w' or 'b'.")
 
+    val castling = raw.castling.map(CastlingRights.fromString).getOrElse(CastlingRights.initial)
+    val ep = raw.enPassant.flatMap { s => if s == "-" then None else Pos.fromAlgebraic(s).toOption }
+    val half = raw.halfMove.flatMap(_.toIntOption).getOrElse(0)
+    val full = raw.fullMove.flatMap(_.toIntOption).getOrElse(1)
+
     for
       side <- sideToMove
       board <- parsePlacement(raw.placement)
       _ <- validateKings(board)
-    yield Game(board, side)
+    yield Game(board, side, castling, ep, half, full)
 
   def encode(game: Game): String =
     val placement = encodePlacement(game.board)
     val side = game.sideToMove match
       case Color.White => "w"
       case Color.Black => "b"
-    s"$placement $side"
+    val castling = game.castlingRights.encoded
+    val ep = game.enPassantTarget.map { p =>
+      (p.file + 'a').toChar.toString + (p.rank + 1).toString
+    }.getOrElse("-")
+    s"$placement $side $castling $ep ${game.halfMoveClock} ${game.fullMoveNumber}"
 
   def parseFile(path: String, parser: FenParser): Either[String, Game] =
     for
@@ -151,8 +167,19 @@ object ParserCombinatorsFenParser extends RegexParsers with FenParser:
   private def tokenChar: Parser[String] = """[^ \t\r\n]""".r
   private def token: Parser[String] = rep1(tokenChar) ^^ (_.mkString)
 
+  private def optFields: Parser[(Option[String], Option[String], Option[String], Option[String])] =
+    opt(ws ~> token ~ opt(ws ~> token ~ opt(ws ~> token ~ opt(ws ~> token)))) ^^ {
+      case None => (None, None, None, None)
+      case Some(c ~ None) => (Some(c), None, None, None)
+      case Some(c ~ Some(e ~ None)) => (Some(c), Some(e), None, None)
+      case Some(c ~ Some(e ~ Some(h ~ None))) => (Some(c), Some(e), Some(h), None)
+      case Some(c ~ Some(e ~ Some(h ~ Some(f)))) => (Some(c), Some(e), Some(h), Some(f))
+    }
+
   private def rawFen: Parser[RawFen] =
-    optWs ~> token ~ ws ~ token <~ optWs ^^ { case placement ~ _ ~ side => RawFen(placement, side) }
+    optWs ~> token ~ ws ~ token ~ optFields <~ optWs ^^ { 
+      case placement ~ _ ~ side ~ ((c, e, h, f)) => RawFen(placement, side, c, e, h, f) 
+    }
 
   def parse(fen: String): Either[String, Game] =
     parseAll(rawFen, fen) match
@@ -174,6 +201,10 @@ object RegexFenParser extends FenParser:
 
     tokens match
       case placement :: side :: Nil => FenSupport.buildGame(RawFen(placement, side))
+      case placement :: side :: castling :: Nil => FenSupport.buildGame(RawFen(placement, side, Some(castling)))
+      case placement :: side :: castling :: ep :: Nil => FenSupport.buildGame(RawFen(placement, side, Some(castling), Some(ep)))
+      case placement :: side :: castling :: ep :: half :: Nil => FenSupport.buildGame(RawFen(placement, side, Some(castling), Some(ep), Some(half)))
+      case placement :: side :: castling :: ep :: half :: full :: Nil => FenSupport.buildGame(RawFen(placement, side, Some(castling), Some(ep), Some(half), Some(full)))
       case _ => Left(FenSupport.FieldError)
 
 object FenParsers:

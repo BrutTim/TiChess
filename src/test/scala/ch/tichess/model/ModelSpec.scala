@@ -63,8 +63,8 @@ final class ModelSpec extends AnyFunSuite:
   test("Rules.validateMove rejects same-square and empty source") {
     val g = Game.initial
     val from = Pos(4, 1)
-    assert(Rules.validateMove(g.board, Color.White, Move(from, from)).left.exists(_.nonEmpty))
-    assert(Rules.validateMove(g.board, Color.White, Move(Pos(4, 4), Pos(4, 5))) == Left("No piece at source position."))
+    assert(Rules.validateMove(g, Move(from, from)).left.exists(_.nonEmpty))
+    assert(Rules.validateMove(g, Move(Pos(4, 4), Pos(4, 5))) == Left("No piece at source position."))
   }
 
   test("Rules.validateMove rejects moving opponent piece and capturing own piece") {
@@ -76,20 +76,20 @@ final class ModelSpec extends AnyFunSuite:
       )
     )
 
-    assert(Rules.validateMove(b, Color.White, Move(Pos(1, 1), Pos(1, 2))) == Left("Not your piece."))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(0, 0), Pos(2, 2))) == Left("Cannot capture your own piece."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(1, 1), Pos(1, 2))) == Left("Not your piece."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(0, 0), Pos(2, 2))) == Left("Cannot capture your own piece."))
   }
 
   test("King moves one step; rejects longer") {
     val b = Board.empty.copy(pieces = Map(Pos(4, 4) -> Piece(Color.White, PieceType.King)))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 4), Pos(5, 5))).isRight)
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 4), Pos(6, 4))) == Left("Illegal king move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 4), Pos(5, 5))).isRight)
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 4), Pos(6, 4))) == Left("Illegal castling rank."))
   }
 
   test("Knight jumps; rejects non-L") {
     val b = Board.empty.copy(pieces = Map(Pos(4, 4) -> Piece(Color.White, PieceType.Knight)))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 4), Pos(6, 5))).isRight)
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 4), Pos(5, 5))) == Left("Illegal knight move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 4), Pos(6, 5))).isRight)
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 4), Pos(5, 5))) == Left("Illegal knight move."))
   }
 
   test("Rook is blocked by pieces") {
@@ -99,8 +99,8 @@ final class ModelSpec extends AnyFunSuite:
         Pos(0, 3) -> Piece(Color.White, PieceType.Pawn)
       )
     )
-    assert(Rules.validateMove(b, Color.White, Move(Pos(0, 0), Pos(0, 7))) == Left("Illegal rook move."))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(0, 0), Pos(0, 2))).isRight)
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(0, 0), Pos(0, 7))) == Left("Illegal rook move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(0, 0), Pos(0, 2))).isRight)
   }
 
   test("Bishop diagonal move respects blocking") {
@@ -110,9 +110,9 @@ final class ModelSpec extends AnyFunSuite:
         Pos(3, 1) -> Piece(Color.Black, PieceType.Pawn)
       )
     )
-    assert(Rules.validateMove(b, Color.White, Move(Pos(2, 0), Pos(4, 2))) == Left("Illegal bishop move."))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(2, 0), Pos(3, 1))).isRight)
-    assert(Rules.validateMove(b, Color.White, Move(Pos(2, 0), Pos(2, 1))) == Left("Illegal bishop move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(2, 0), Pos(4, 2))) == Left("Illegal bishop move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(2, 0), Pos(3, 1))).isRight)
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(2, 0), Pos(2, 1))) == Left("Illegal bishop move."))
   }
 
   test("Queen supports rook/bishop lines and path blocking") {
@@ -122,9 +122,9 @@ final class ModelSpec extends AnyFunSuite:
         Pos(4, 6) -> Piece(Color.Black, PieceType.Pawn)
       )
     )
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 4), Pos(4, 7))) == Left("Illegal queen move."))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 4), Pos(4, 6))).isRight)
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 4), Pos(6, 5))) == Left("Illegal queen move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 4), Pos(4, 7))) == Left("Illegal queen move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 4), Pos(4, 6))).isRight)
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 4), Pos(6, 5))) == Left("Illegal queen move."))
   }
 
   test("Pawn forward, double-step, and diagonal capture rules") {
@@ -135,28 +135,28 @@ final class ModelSpec extends AnyFunSuite:
         Pos(4, 2) -> Piece(Color.Black, PieceType.Pawn) // blocks forward
       )
     )
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 1), Pos(4, 2))) == Left("Illegal pawn move."))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 1), Pos(4, 3))) == Left("Illegal pawn move."))
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 1), Pos(5, 2))).isRight)
-    assert(Rules.validateMove(b, Color.White, Move(Pos(4, 1), Pos(3, 2))) == Left("Illegal pawn move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 1), Pos(4, 2))) == Left("Illegal pawn move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 1), Pos(4, 3))) == Left("Illegal pawn move."))
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 1), Pos(5, 2))).isRight)
+    assert(Rules.validateMove(Game(b, Color.White), Move(Pos(4, 1), Pos(3, 2))) == Left("Illegal pawn move."))
   }
 
   test("Pawn double-step works when clear; black pawn direction") {
     val bW = Board.empty.copy(pieces = Map(Pos(4, 1) -> Piece(Color.White, PieceType.Pawn)))
-    assert(Rules.validateMove(bW, Color.White, Move(Pos(4, 1), Pos(4, 3))).isRight)
+    assert(Rules.validateMove(Game(bW, Color.White), Move(Pos(4, 1), Pos(4, 3))).isRight)
 
     val bB = Board.empty.copy(pieces = Map(Pos(4, 6) -> Piece(Color.Black, PieceType.Pawn)))
-    assert(Rules.validateMove(bB, Color.Black, Move(Pos(4, 6), Pos(4, 4))).isRight)
-    assert(Rules.validateMove(bB, Color.Black, Move(Pos(4, 6), Pos(4, 7))) == Left("Illegal pawn move."))
+    assert(Rules.validateMove(Game(bB, Color.Black), Move(Pos(4, 6), Pos(4, 4))).isRight)
+    assert(Rules.validateMove(Game(bB, Color.Black), Move(Pos(4, 6), Pos(4, 7))) == Left("Illegal pawn move."))
   }
 
   test("Promotion validation accepts promotable roles and rejects invalid promotion usage") {
     val whitePawn = Board.empty.copy(pieces = Map(Pos(0, 6) -> Piece(Color.White, PieceType.Pawn)))
-    assert(Rules.validateMove(whitePawn, Color.White, Move(Pos(0, 6), Pos(0, 7), Some(PromotionRole.Queen))).isRight)
+    assert(Rules.validateMove(Game(whitePawn, Color.White), Move(Pos(0, 6), Pos(0, 7), Some(PromotionRole.Queen))).isRight)
 
     val rookBoard = Board.empty.copy(pieces = Map(Pos(0, 0) -> Piece(Color.White, PieceType.Rook)))
     assert(
-      Rules.validateMove(rookBoard, Color.White, Move(Pos(0, 0), Pos(0, 7), Some(PromotionRole.Queen))) ==
+      Rules.validateMove(Game(rookBoard, Color.White), Move(Pos(0, 0), Pos(0, 7), Some(PromotionRole.Queen))) ==
         Left("Promotion is only allowed for pawns reaching the back rank.")
     )
   }
@@ -367,4 +367,57 @@ final class ModelSpec extends AnyFunSuite:
     val b = Board.empty.copy(pieces = Map(Pos(0, 1) -> Piece(Color.White, PieceType.Pawn)))
     assert(!Rules.clearPath(b, Pos(0, 0), Pos(0, 3)))
     assert(Rules.findKing(Board.empty.copy(pieces = Map(Pos(3, 3) -> Piece(Color.White, PieceType.King))), Color.White).contains(Pos(3, 3)))
+  }
+
+  test("CastlingRights.revokeBlack revokes only black rights") {
+    val initial = CastlingRights(true, true, true, true)
+    val revoked = initial.revokeBlack
+    assert(revoked.whiteKingside == true)
+    assert(revoked.whiteQueenside == true)
+    assert(revoked.blackKingside == false)
+    assert(revoked.blackQueenside == false)
+  }
+
+  test("CastlingRights.revokeWhite revokes only white rights") {
+    val initial = CastlingRights(true, true, true, true)
+    val revoked = initial.revokeWhite
+    assert(revoked.whiteKingside == false)
+    assert(revoked.whiteQueenside == false)
+    assert(revoked.blackKingside == true)
+    assert(revoked.blackQueenside == true)
+  }
+
+  test("Stalemate detection from user PGN") {
+    val pgn = """[Event "TiChess Game"]
+[Site "Local"]
+[Date "2026.04.15"]
+[Round "-"]
+[White "White"]
+[Black "Black"]
+[Result "*"]
+
+1. e2e3 a7a5 2. d1h5 a8a6 3. h5a5 h7h5 4. h2h4 a6h6 5. a5c7 f7f6 6. c7d7 e8f7 7. d7b7 d8d3 8. b7b8 d3h7 9. b8c8 f7g6 10. c8e6 *"""
+    
+    val imported = Pgn.parse(pgn, NotationParsers.regex).getOrElse(fail("Could not parse PGN"))
+    val finalGame = imported.game
+    
+    // Check state after 10. c8e6
+    assert(finalGame.sideToMove == Color.Black)
+    assert(!finalGame.isInCheck)
+    
+    // Manual check of black pieces and moves:
+    // King at g6: 
+    //   - f5: controlled by Dame e6
+    //   - f7: controlled by Dame e6
+    //   - g5: controlled by Pawn h4
+    //   - g7: blocked by own Pawn g7 (Wait, is there a pawn at g7?)
+    //   - h6: blocked by own Rook h6
+    //   - h7: blocked by own Queen h7
+    // Pawns:
+    //   - f6: blocked by Dame e6 (Dame is at e6, Pawn at f6, moves to f5? Dame e6 blocks f5?) 
+    //         Pawn f6 moves to f5. Dame e6 occupies e6. Does it block f5? No, f5 is empty.
+    //         Wait, let's trace moves.
+    
+    val legalMoves = finalGame.legalMoves
+    assert(finalGame.isDraw, "Game should be a draw (stalemate)")
   }

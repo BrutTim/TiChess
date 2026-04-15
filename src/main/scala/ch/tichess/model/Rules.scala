@@ -71,7 +71,12 @@ object Rules:
       }
     }
 
-  def validateMove(board: Board, sideToMove: Color, move: Move): Either[String, Unit] =
+  def isDraw(game: Game): Boolean =
+    game.halfMoveClock >= 100 || (!game.isInCheck && game.legalMoves.isEmpty)
+
+  def validateMove(game: Game, move: Move): Either[String, Unit] =
+    val board = game.board
+    val sideToMove = game.sideToMove
     if move.from == move.to then Left("Source and destination must differ.")
     else
       board.pieceAt(move.from) match
@@ -93,6 +98,21 @@ object Rules:
               piece.kind match
                 case PieceType.King =>
                   if absDf <= 1 && absDr <= 1 then Right(())
+                  else if absDf == 2 && absDr == 0 && move.from.file == 4 then
+                    val rank = if sideToMove == Color.White then 0 else 7
+                    if move.from.rank != rank then Left("Illegal castling rank.")
+                    else if game.isInCheck then Left("Cannot castle out of check.")
+                    else
+                      val isKingside = df > 0
+                      val rightsOk = sideToMove match
+                        case Color.White => if isKingside then game.castlingRights.whiteKingside else game.castlingRights.whiteQueenside
+                        case Color.Black => if isKingside then game.castlingRights.blackKingside else game.castlingRights.blackQueenside
+                      
+                      if !rightsOk then Left("Castling rights lost.")
+                      else if !clearPath(board, move.from, Pos(if isKingside then 7 else 0, rank)) then Left("Castling path not clear.")
+                      else if isInCheck(board.movePiece(Move(move.from, Pos(move.from.file + sign(df), rank))).toOption.get, sideToMove) then
+                        Left("Cannot castle through check.")
+                      else Right(())
                   else Left("Illegal king move.")
 
                 case PieceType.Queen =>
@@ -115,15 +135,16 @@ object Rules:
                   if ok then Right(()) else Left("Illegal knight move.")
 
                 case PieceType.Pawn =>
-                  val dir = if piece.color == Color.White then 1 else -1
-                  val startRank = if piece.color == Color.White then 1 else 6
+                  val dir = if sideToMove == Color.White then 1 else -1
+                  val startRank = if sideToMove == Color.White then 1 else 6
                   val oneForward = df == 0 && dr == dir && board.isEmpty(move.to)
                   val twoForward =
                     df == 0 && dr == 2 * dir && move.from.rank == startRank &&
                       board.isEmpty(move.to) &&
                       board.isEmpty(Pos(move.from.file, move.from.rank + dir))
-                  val captureDiag =
-                    absDf == 1 && dr == dir && board.pieceAt(move.to).exists(_.color != piece.color)
+                  val isCapture = board.pieceAt(move.to).exists(_.color != sideToMove)
+                  val isEnPassant = game.enPassantTarget.contains(move.to)
+                  val captureDiag = absDf == 1 && dr == dir && (isCapture || isEnPassant)
 
                   if oneForward || twoForward || captureDiag then Right(())
                   else Left("Illegal pawn move.")

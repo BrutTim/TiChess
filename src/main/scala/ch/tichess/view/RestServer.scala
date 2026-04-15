@@ -98,6 +98,17 @@ object RestServer extends JsonSupport:
                 |        .promo-btn:hover { background: var(--highlight); transform: translateY(-2px); }
                 |        .piece-white { color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
                 |        .piece-black { color: #000000; text-shadow: 0 1px 2px rgba(255,255,255,0.6); }
+                |        .board.game-over { pointer-events: none; opacity: 0.75; }
+                |        .action-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+                |        .action-btn {
+                |            padding: 0.45rem 1.1rem; border-radius: 0.5rem; border: 1px solid var(--glass-border);
+                |            background: var(--glass-bg); color: var(--text-color); font-size: 0.9rem;
+                |            cursor: pointer; transition: all 0.2s;
+                |        }
+                |        .action-btn:hover:not(:disabled) { background: var(--highlight); }
+                |        .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+                |        .action-btn.accept { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); }
+                |        .action-btn.accept:hover:not(:disabled) { background: rgba(34,197,94,0.45); }
                 |    </style>
                 |</head>
                 |<body>
@@ -106,6 +117,10 @@ object RestServer extends JsonSupport:
                 |    <h1>TiChess Web GUI</h1>
                 |    <div id="status" class="status">Connecting...</div>
                 |    <div id="board" class="board"></div>
+                |    <div class="action-bar">
+                |        <button id="btn-draw" class="action-btn" onclick="sendCommand('draw')">Remis anbieten</button>
+                |        <button id="btn-accept" class="action-btn accept" style="display:none" onclick="sendCommand('accept')">Remis annehmen ✓</button>
+                |    </div>
                 |</div>
                 |
                 |<div id="promo-modal" class="modal-overlay">
@@ -127,6 +142,7 @@ object RestServer extends JsonSupport:
                 |        'n': { char: '&#x265E;&#xFE0E;', cls: 'piece-black' }, 'p': { char: '&#x265F;&#xFE0E;', cls: 'piece-black' }
                 |    };
                 |    let selectedIdx = null; let currentBoard = new Array(64).fill(null); let pendingPromoMove = null;
+                |    let isGameOver = false;
                 |    function algebraic(idx) {
                 |        const file = idx % 8; const rank = 7 - Math.floor(idx / 8);
                 |        return String.fromCharCode('a'.charCodeAt(0) + file) + (rank + 1);
@@ -135,6 +151,13 @@ object RestServer extends JsonSupport:
                 |        try {
                 |            const response = await fetch('/api/view/game'); const data = await response.json();
                 |            document.getElementById('status').innerText = data.statusText;
+                |            isGameOver = data.isGameOver;
+                |            const boardEl = document.getElementById('board');
+                |            if (isGameOver) boardEl.classList.add('game-over'); else boardEl.classList.remove('game-over');
+                |            const btnDraw = document.getElementById('btn-draw');
+                |            const btnAccept = document.getElementById('btn-accept');
+                |            btnDraw.disabled = isGameOver || data.drawOffered;
+                |            btnAccept.style.display = data.drawOffered && !isGameOver ? 'inline-block' : 'none';
                 |            renderFen(data.fen);
                 |        } catch (e) { document.getElementById('status').innerText = "Connection lost."; }
                 |    }
@@ -161,6 +184,7 @@ object RestServer extends JsonSupport:
                 |        }
                 |    }
                 |    function handleSquareClick(idx) {
+                |        if (isGameOver) return;
                 |        if (selectedIdx === null) {
                 |            if (currentBoard[idx]) { selectedIdx = idx; drawBoard(); }
                 |        } else {
@@ -183,6 +207,14 @@ object RestServer extends JsonSupport:
                 |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: algebraicMove }) });
                 |            const data = await res.json();
                 |            if (!data.success && data.message) document.getElementById('status').innerText = "Illegal: " + data.message;
+                |            fetchGame();
+                |        } catch (e) { console.error(e); }
+                |    }
+                |    async function sendCommand(cmd) {
+                |        try {
+                |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: cmd }) });
+                |            const data = await res.json();
+                |            if (data.message) document.getElementById('status').innerText = data.message;
                 |            fetchGame();
                 |        } catch (e) { console.error(e); }
                 |    }
@@ -252,9 +284,13 @@ object RestServer extends JsonSupport:
         pathPrefix("api" / "view") {
           get {
             path("game") {
-              // We use GuiViewState specifically to generate nicely formatted statusTexts
               val guiState = GuiViewState(appState.game)
-              complete(StateResponse(Fen.encode(appState.game), guiState.statusText, guiState.isGameOver))
+              complete(StateResponse(
+                Fen.encode(appState.game),
+                guiState.statusText,
+                guiState.isGameOver,
+                appState.drawOfferedBy.nonEmpty
+              ))
             }
           }
         }

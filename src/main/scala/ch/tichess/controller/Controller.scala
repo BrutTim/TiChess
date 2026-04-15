@@ -12,6 +12,8 @@ enum Command:
   case ShowParserCmd
   case Help
   case Quit
+  case DrawOffer
+  case DrawAccept
 
 object Command:
   def parse(input: String): Either[String, Command] =
@@ -36,6 +38,8 @@ object Command:
           case "pgn" => Left("Expected a PGN after 'pgn import' or use 'pgn export'.")
           case "q" | "quit" | "exit" => Right(Command.Quit)
           case "h" | "help"          => Right(Command.Help)
+          case "draw"                => Right(Command.DrawOffer)
+          case "accept"              => Right(Command.DrawAccept)
           case _ =>
             val parts = trimmed.split("\\s+").toList
             parts match
@@ -56,7 +60,8 @@ final case class AppState(
     game: Game,
     parserChoice: ParserChoice = NotationParsers.default,
     startGame: Game = Game.initial,
-    moveHistory: Vector[Move] = Vector.empty
+    moveHistory: Vector[Move] = Vector.empty,
+    drawOfferedBy: Option[Color] = None
 )
 
 final case class UpdateResult(state: AppState, message: Option[String], quit: Boolean):
@@ -64,7 +69,7 @@ final case class UpdateResult(state: AppState, message: Option[String], quit: Bo
 
 object Controller:
   def initial: Game = Game.initial
-  def initialState: AppState = AppState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty)
+  def initialState: AppState = AppState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty, drawOfferedBy = None)
 
   private def colorLabel(c: Color): String = c match
     case Color.White => "White"
@@ -94,18 +99,32 @@ object Controller:
                                       "- FEN exportieren: `fen export`",
                                       "- PGN importieren: `pgn import <pgn>`",
                                       "- PGN exportieren: `pgn export`",
+                                      "- Remis anbieten: `draw`",
+                                      "- Remis annehmen: `accept`",
                                       "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
                                     ).mkString("\n")), quit = false))
+      case Right(Command.DrawOffer) =>
+        val offerer = state.game.sideToMove
+        val nextState = state.copy(drawOfferedBy = Some(offerer))
+        Future.successful(UpdateResult(nextState, Some(s"${colorLabel(offerer)} bietet Remis an. Zum Annehmen 'accept' eingeben."), quit = false))
+      case Right(Command.DrawAccept) =>
+        state.drawOfferedBy match
+          case Some(_) =>
+            Future.successful(UpdateResult(state, Some("Spiel durch Remis-Übereinkunft beendet."), quit = true))
+          case None =>
+            Future.successful(UpdateResult(state, Some("Kein Remis-Angebot vorhanden."), quit = false))
       case Right(Command.Quit) =>
         Future.successful(UpdateResult(state, Some("Bye."), quit = true))
       case Right(Command.MoveCmd(mv)) =>
         modelService.applyMove(state.game, mv).map {
           case Left(err)     => UpdateResult(state, Some(err), quit = false)
           case Right(nextGm) =>
-            val nextState = state.copy(game = nextGm, moveHistory = state.moveHistory :+ mv)
+            val nextState = state.copy(game = nextGm, moveHistory = state.moveHistory :+ mv, drawOfferedBy = None)
             if nextGm.isCheckmate then
               val winner = colorLabel(nextGm.sideToMove.other)
               UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
+            else if nextGm.isDraw then
+              UpdateResult(nextState, Some(s"Draw (Stalemate)."), quit = true)
             else UpdateResult(nextState, None, quit = false)
         }
       case Right(Command.ImportFenCmd(fenStr)) =>
@@ -116,6 +135,8 @@ object Controller:
             if newGame.isCheckmate then
               val winner = colorLabel(newGame.sideToMove.other)
               Future.successful(UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true))
+            else if newGame.isDraw then
+              Future.successful(UpdateResult(nextState, Some("Draw (Stalemate)."), quit = true))
             else Future.successful(UpdateResult(nextState, Some(s"Position set using ${state.parserChoice.id}."), quit = false))
       case Right(Command.ExportFenCmd) =>
         Future.successful(UpdateResult(state, Some(Fen.encode(state.game)), quit = false))
@@ -131,7 +152,17 @@ object Controller:
             if imported.game.isCheckmate then
               val winner = colorLabel(imported.game.sideToMove.other)
               Future.successful(UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true))
-            else Future.successful(UpdateResult(nextState, Some(s"PGN imported using ${state.parserChoice.id}."), quit = false))
+            else if imported.game.isDraw then
+              Future.successful(UpdateResult(nextState, Some("Draw (Stalemate)."), quit = true))
+            else imported.result match
+              case "1/2-1/2" =>
+                Future.successful(UpdateResult(nextState, Some("Remis (laut PGN)."), quit = true))
+              case "1-0" =>
+                Future.successful(UpdateResult(nextState, Some("White wins (laut PGN)."), quit = true))
+              case "0-1" =>
+                Future.successful(UpdateResult(nextState, Some("Black wins (laut PGN)."), quit = true))
+              case _ =>
+                Future.successful(UpdateResult(nextState, Some(s"PGN imported using ${state.parserChoice.id}."), quit = false))
       case Right(Command.ExportPgnCmd) =>
         Future.successful(UpdateResult(state, Some(Pgn.encode(state.startGame, state.moveHistory)), quit = false))
       case Right(Command.ShowParserCmd) =>

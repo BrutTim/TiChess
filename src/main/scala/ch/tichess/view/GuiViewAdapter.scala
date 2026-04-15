@@ -14,18 +14,25 @@ final case class GuiViewState(
     moveEntries: Vector[String] = Vector.empty,
     pendingPromotion: Option[PendingPromotion] = None,
     selectedParserId: String = NotationParsers.default.id,
-    notationText: String = ""
+    notationText: String = "",
+    drawOfferedBy: Option[Color] = None,
+    drawAgreed: Boolean = false
 ):
-  def isGameOver: Boolean = game.isCheckmate
+  def isGameOver: Boolean = game.isCheckmate || game.isDraw || drawAgreed
 
   def parserChoice: ParserChoice =
     NotationParsers.resolve(selectedParserId).getOrElse(NotationParsers.default)
 
   def statusText: String =
-    if game.isCheckmate then s"Schachmatt - ${GuiViewAdapter.colorLabel(game.sideToMove.other)} gewinnt"
+    if drawAgreed then "Remis - Einigung"
+    else if game.isCheckmate then s"Schachmatt - ${GuiViewAdapter.colorLabel(game.sideToMove.other)} gewinnt"
+    else if game.isDraw then
+      if game.halfMoveClock >= 100 then "Remis - 50-Züge-Regel"
+      else "Patt - Remis"
     else
       val turn = s"${GuiViewAdapter.colorLabel(game.sideToMove)} to move"
-      if game.isInCheck then s"$turn | Schach" else turn
+      val drawNote = drawOfferedBy.map(c => s" | ${GuiViewAdapter.colorLabel(c)} bietet Remis an").getOrElse("")
+      if game.isInCheck then s"$turn | Schach$drawNote" else s"$turn$drawNote"
 
 object GuiViewState:
   val initial: GuiViewState = GuiViewState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty)
@@ -78,20 +85,35 @@ object GuiViewAdapter:
     Pgn.parse(pgn.trim, state.parserChoice) match
       case Left(err) => state.copy(infoMessage = Some(err))
       case Right(imported) =>
-        clearSelection(
+        val base = clearSelection(
           state.copy(
             game = imported.game,
             startGame = imported.startGame,
             moveHistory = imported.moves,
             moveEntries = buildMoveEntries(imported.startGame, imported.moves),
-            infoMessage = Some(s"PGN importiert mit ${state.parserChoice.id}."),
             pendingPromotion = None,
-            notationText = pgn.trim
+            notationText = pgn.trim,
+            drawOfferedBy = None
           )
         )
+        if imported.game.isCheckmate then
+          val winner = colorLabel(imported.game.sideToMove.other)
+          base.copy(infoMessage = Some(s"Schachmatt - $winner gewinnt"))
+        else if imported.game.isDraw then
+          base.copy(infoMessage = Some("Patt - Remis"))
+        else imported.result match
+          case "1/2-1/2" =>
+            base.copy(drawAgreed = true, infoMessage = Some("Remis (laut PGN)."))
+          case "1-0" =>
+            base.copy(drawAgreed = true, infoMessage = Some("White wins (laut PGN)."))
+          case "0-1" =>
+            base.copy(drawAgreed = true, infoMessage = Some("Black wins (laut PGN)."))
+          case _ =>
+            base.copy(infoMessage = Some(s"PGN importiert mit ${state.parserChoice.id}."))
 
   def exportPgn(state: GuiViewState): GuiViewState =
-    state.copy(notationText = Pgn.encode(state.startGame, state.moveHistory), infoMessage = Some("PGN exportiert."))
+    val result = if state.drawAgreed then Some("1/2-1/2") else None
+    state.copy(notationText = Pgn.encode(state.startGame, state.moveHistory, result), infoMessage = Some("PGN exportiert."))
 
   def choosePromotion(state: GuiViewState, role: PromotionRole): GuiViewState =
     state.pendingPromotion match
@@ -105,6 +127,26 @@ object GuiViewAdapter:
 
   def cancelPromotion(state: GuiViewState): GuiViewState =
     state.copy(pendingPromotion = None, infoMessage = None)
+
+  def drawOffer(state: GuiViewState): GuiViewState =
+    if state.isGameOver then state
+    else
+      val offerer = state.game.sideToMove
+      state.copy(
+        drawOfferedBy = Some(offerer),
+        infoMessage = Some(s"${colorLabel(offerer)} bietet Remis an. Zum Annehmen 'Remis annehmen' klicken.")
+      )
+
+  def drawAccept(state: GuiViewState): GuiViewState =
+    state.drawOfferedBy match
+      case Some(_) =>
+        state.copy(
+          drawAgreed = true,
+          drawOfferedBy = None,
+          infoMessage = Some("Spiel durch Remis-Übereinkunft beendet.")
+        )
+      case None =>
+        state.copy(infoMessage = Some("Kein Remis-Angebot vorhanden."))
 
   private def select(state: GuiViewState, pos: Pos): GuiViewState =
     state.copy(
@@ -128,57 +170,108 @@ object GuiViewAdapter:
 
   private def applyMove(state: GuiViewState, move: Move, pendingInfo: Option[String]): GuiViewState =
     val mover = state.game.sideToMove
-    val movingPiece = state.game.board.pieceAt(move.from)
     state.game.applyMove(move) match
       case Left(err) => state.copy(infoMessage = Some(err))
       case Right(next) =>
+        // A move clears the pending draw offer from the opponent
         val updated = clearSelection(
           state.copy(
             game = next,
             moveHistory = state.moveHistory :+ move,
-            moveEntries = state.moveEntries :+ formatMove(state.moveEntries, mover, move, movingPiece, next.board),
-            infoMessage = pendingInfo.orElse(state.infoMessage)
+            moveEntries = updateMoveEntries(state.moveEntries, state.game, move, mover, next),
+            infoMessage = pendingInfo.orElse(state.infoMessage),
+            drawOfferedBy = None
           )
         )
         if next.isCheckmate then updated.copy(infoMessage = Some(s"Schachmatt - ${colorLabel(mover)} gewinnt"))
+        else if next.isDraw then
+          val drawMsg = if next.halfMoveClock >= 100 then "Remis - 50-Züge-Regel" else "Patt - Remis"
+          updated.copy(infoMessage = Some(drawMsg))
         else if next.isInCheck then updated.copy(infoMessage = Some("Schach"))
         else updated.copy(infoMessage = None)
 
   private def legalMovesFrom(game: Game, from: Pos): Set[Pos] =
     game.legalMoves.collect { case Move(`from`, to, _) => to }.toSet
 
-  private def formatMove(
-      moveLog: Vector[String],
-      mover: Color,
+  private def updateMoveEntries(
+      entries: Vector[String],
+      gameBefore: Game,
       move: Move,
-      movingPiece: Option[Piece],
-      boardAfter: Board
-  ): String =
-    val moveNumber = moveLog.size / 2 + 1
-    val side = mover match
-      case Color.White => "W"
-      case Color.Black => "B"
-    val promotionSuffix =
-      (movingPiece, boardAfter.pieceAt(move.to)) match
-        case (Some(Piece(_, PieceType.Pawn)), Some(Piece(_, kind))) if move.to.rank == 0 || move.to.rank == 7 =>
-          move.promotion.fold("") {
-            case PromotionRole.Queen  => "=Q"
-            case PromotionRole.Rook   => "=R"
-            case PromotionRole.Bishop => "=B"
-            case PromotionRole.Knight => "=N"
-          }
-        case _ => ""
-    s"$moveNumber. $side ${toAlg(move.from)}-${toAlg(move.to)}$promotionSuffix"
+      mover: Color,
+      gameAfter: Game
+  ): Vector[String] =
+    val san = toSAN(gameBefore, move, gameAfter)
+    mover match
+      case Color.White =>
+        val moveNum = entries.size + 1
+        entries :+ f"$moveNum%-4d $san"
+      case Color.Black =>
+        if entries.nonEmpty then
+          val padded = f"${entries.last}%-18s"
+          entries.updated(entries.size - 1, s"$padded $san")
+        else
+          entries :+ s"...  $san"
+
+  private def toSAN(game: Game, move: Move, gameAfter: Game): String =
+    val piece = game.board.pieceAt(move.from).get
+    val isCapture = game.board.pieceAt(move.to).isDefined ||
+      (piece.kind == PieceType.Pawn && game.enPassantTarget.contains(move.to))
+
+    val base =
+      if piece.kind == PieceType.King && Math.abs(move.to.file - move.from.file) == 2 then
+        if move.to.file > move.from.file then "O-O" else "O-O-O"
+      else
+        val pieceChar = piece.kind match
+          case PieceType.King   => "K"
+          case PieceType.Queen  => "D"
+          case PieceType.Rook   => "T"
+          case PieceType.Bishop => "L"
+          case PieceType.Knight => "S"
+          case PieceType.Pawn   => ""
+
+        val disambig =
+          if piece.kind != PieceType.Pawn then disambiguate(game, move, piece)
+          else if isCapture then s"${('a' + move.from.file).toChar}"
+          else ""
+
+        val captureStr = if isCapture then "x" else ""
+        val dest = toAlg(move.to)
+        val promoStr = move.promotion.map {
+          case PromotionRole.Queen  => "=D"
+          case PromotionRole.Rook   => "=T"
+          case PromotionRole.Bishop => "=L"
+          case PromotionRole.Knight => "=S"
+        }.getOrElse("")
+        s"$pieceChar$disambig$captureStr$dest$promoStr"
+
+    val suffix =
+      if gameAfter.isCheckmate then "#"
+      else if gameAfter.isInCheck then "+"
+      else ""
+    s"$base$suffix"
+
+  private def disambiguate(game: Game, move: Move, piece: Piece): String =
+    val others = game.legalMoves.filter { m =>
+      m.to == move.to &&
+      m.from != move.from &&
+      game.board.pieceAt(m.from).exists(p => p.kind == piece.kind && p.color == piece.color)
+    }
+    if others.isEmpty then ""
+    else
+      val sameFile = others.exists(_.from.file == move.from.file)
+      val sameRank = others.exists(_.from.rank == move.from.rank)
+      if !sameFile then s"${('a' + move.from.file).toChar}"
+      else if !sameRank then s"${move.from.rank + 1}"
+      else s"${('a' + move.from.file).toChar}${move.from.rank + 1}"
 
   private[view] def buildMoveEntries(startGame: Game, moves: Vector[Move]): Vector[String] =
     val (_, entries) =
       moves.foldLeft((startGame, Vector.empty[String])) { case ((game, log), move) =>
         val mover = game.sideToMove
-        val movingPiece = game.board.pieceAt(move.from)
         game.applyMove(move) match
           case Right(next) =>
-            val entry = formatMove(log, mover, move, movingPiece, next.board)
-            (next, log :+ entry)
+            val newLog = updateMoveEntries(log, game, move, mover, next)
+            (next, newLog)
           case Left(_) =>
             (game, log)
       }

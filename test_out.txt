@@ -1,0 +1,166 @@
+[info] welcome to sbt 1.10.11 (Oracle Corporation Java 22)
+[info] loading global plugins from /Users/timbrutscher/.sbt/1.0/plugins
+[info] loading settings for project tichess-build from plugins.sbt...
+[info] loading project definition from /Users/timbrutscher/Documents/Uni/Semester_5/SoftArch/TiChess/project
+[info] loading settings for project root from build.sbt...
+[info] set current project to TiChess (in build file:/Users/timbrutscher/Documents/Uni/Semester_5/SoftArch/TiChess/)
+[info] ViewSpec:
+[info] - ConsoleView.renderBoard prints ranks/files and pieces
+[info] - ConsoleView.render includes optional message and turn label
+[info] - ConsoleView.render uses default message parameter
+[info] GuiViewAdapterSpec:
+[info] - selecting an own piece marks all legal targets
+[info] - successful move updates side-to-move and appends white/black move log entries
+[info] - setFen sets game state, clears move log and updates status on checkmate
+[info] - status text reports normal turns, check, and black to move
+[info] - handleSquareClick covers invalid click, reselection, deselection, and game-over ignore
+[info] - setFen reports parse errors and leaves the current state otherwise intact
+[info] - GUI parser selection, FEN export, and PGN import/export use the selected parser
+[info] - GUI reports invalid parser ids and invalid PGN without changing the game
+[info] - choosePromotion keeps state unchanged when no promotion is pending
+[info] - attemptMove surfaces illegal target errors when state and target disagree
+[info] - successful moves can announce check and checkmate *** FAILED ***
+[info]   java.util.NoSuchElementException: None.get
+[info]   at scala.None$.get(Option.scala:627)
+[info]   at scala.None$.get(Option.scala:626)
+[info]   at ch.tichess.model.Game.applyMoveToBoard$$anonfun$1(Game.scala:89)
+[info]   at scala.util.Either.map(Either.scala:390)
+[info]   at ch.tichess.model.Game.applyMoveToBoard(Game.scala:79)
+[info]   at ch.tichess.model.Game.legalMoves$$anonfun$1$$anonfun$1$$anonfun$1$$anonfun$1(Game.scala:24)
+[info]   at scala.Option.flatMap(Option.scala:283)
+[info]   at ch.tichess.model.Game.legalMoves$$anonfun$1$$anonfun$1$$anonfun$1(Game.scala:23)
+[info]   at scala.collection.immutable.List.flatMap(List.scala:294)
+[info]   at ch.tichess.model.Game.legalMoves$$anonfun$1$$anonfun$1(Game.scala:22)
+[info]   ...
+[info] - promotion in GUI requires a choice and applies the selected role
+[info] - promotion choice covers queen rook bishop and rejects invalid roles
+[info] - buildMoveEntries silently ignores invalid moves
+[info] FenSpec:
+[info] - Fen.encode(Game.initial) matches standard initial FEN
+[info] - all parsers accept initial FEN and allow surrounding whitespace including newlines
+[info] - all parsers reject missing or extra input instead of leaving rest *** FAILED ***
+[info]   Left("FEN must contain exactly one black king.") did not equal Left("FEN must contain exactly placement and side-to-move.") unexpected result for scala-parser-combinators (FenSpec.scala:16)
+[info]   Analysis:
+[info]   Left(value: "...ust contain exactly [one black king]." -> "...ust contain exactly [placement and side-to-move].")
+[info] - all parsers produce the same semantic validation errors
+[info] - Fen.encode round-trips a position with mixed empty runs and black to move
+[info] - Fen.parse delegates to the default parser and parseWith exposes individual implementations
+[info] - Fen.parseFile loads valid FEN for the default parser and parseFileWith works for all parser variants
+[info] - Fen.parseFile and parseFileWith report IO and parse failures on the Either error track *** FAILED ***
+[info]   Left("FEN side-to-move must be 'w' or 'b'.") did not equal Left("FEN must contain exactly placement and side-to-move.") unexpected invalid file result for scala-parser-combinators (FenSpec.scala:93)
+[info]   Analysis:
+[info]   Left(value: "FEN [side-to-move must be 'w' or 'b']." -> "FEN [must contain exactly placement and side-to-move].")
+[info] MainSpec:
+[info] - ConsoleApp.run handles quit and prints final message
+[info] - ConsoleApp.run recurses on non-quit command
+[info] - ConsoleApp.run stops on null input
+White to move
+8 r n b q k b n r
+7 p p p p p p p p
+6 . . . . . . . .
+5 . . . . . . . .
+4 . . . . . . . .
+3 . . . . . . . .
+2 P P P P P P P P
+1 R N B Q K B N R
+  a b c d e f g h
+Bye.
+White to move
+8 r n b q k b n r
+7 p p p p p p p p
+6 . . . . . . . .
+5 . . . . . . . .
+4 . . . . . . . .
+3 . . . . . . . .
+2 P P P P P P P P
+1 R N B Q K B N R
+  a b c d e f g h
+[info] - Main.main can run scripted args without blocking
+[info] - StdIO delegates to provided functions
+[info] - Main.mainWith runs interactive branch with injected IO
+[info] - ScriptIO readLine covers Nil and non-Nil branches
+test-output
+[info] - LiveStdIO write lambda can be invoked
+[info] - LiveStdIO read lambda can be invoked without blocking
+[info] ModelSpec:
+[info] - Color.other flips
+[info] - Pos.fromAlgebraic parses valid and rejects invalid
+[info] - Pos.+ adds delta
+[info] - PieceType promotion parser accepts promotable roles and rejects others
+[info] - Board.initial has 32 pieces and correct corners
+[info] - Board.movePiece moves and captures
+[info] - Board.movePiece rejects when no source piece; Board.removeAt removes
+[info] - Rules.validateMove rejects same-square and empty source
+[info] - Rules.validateMove rejects moving opponent piece and capturing own piece
+[info] - King moves one step; rejects longer *** FAILED ***
+[info]   Left("Illegal castling rank.") did not equal Left("Illegal king move.") (ModelSpec.scala:86)
+[info]   Analysis:
+[info]   Left(value: "Illegal [castling rank]." -> "Illegal [king move].")
+[info] - Knight jumps; rejects non-L
+[info] - Rook is blocked by pieces
+[info] - Bishop diagonal move respects blocking
+[info] - Queen supports rook/bishop lines and path blocking
+[info] - Pawn forward, double-step, and diagonal capture rules
+[info] - Pawn double-step works when clear; black pawn direction
+[info] - Promotion validation accepts promotable roles and rejects invalid promotion usage
+[info] - Game.applyMove applies move and flips side; rejects invalid
+[info] - Game.applyMove promotes pawns, defaults to queen, and exposes all promotion roles in legalMoves
+[info] - Rules.isInCheck detects rook and knight attacks
+[info] - Rules.isInCheck false when line is blocked and when king missing
+[info] - When in check, unrelated move is illegal
+[info] - Check can be resolved by capture, block, or king move to safe square
+[info] - King cannot move onto attacked square
+[info] - Game.isCheckmate is true when in check and no legal moves
+[info] - Game.isCheckmate is false when check can be escaped
+[info] - Game.isCheckmate is false when not in check
+[info] - Rules helpers: sign and squaresBetweenExclusive
+[info] PgnSpec:
+[info] - all PGN parsers import the same move history and resulting game
+[info] - PGN export writes movetext and omits FEN for the standard starting position
+[info] - PGN export sets result to 1-0 or 0-1 on checkmate instead of '*'
+[info] - PGN export includes FEN only for non-standard starting positions and still round-trips *** FAILED ***
+[info]   "[Event "TiChess Game"]
+[info]   [Site "Local"]
+[info]   [Date "2026.04.14"]
+[info]   [Round "-"]
+[info]   [White "White"]
+[info]   [Black "Black"]
+[info]   [Result "*"]
+[info]   [SetUp "1"]
+[info]   [FEN "4k3/8/8/8/8/8/4P3/4K3 w KQkq - 0 1"]
+[info]   
+[info]   1. e2e4 *" did not contain "[FEN "4k3/8/8/8/8/8/4P3/4K3 w"]" (PgnSpec.scala:77)
+[info] - PGN parsers reject invalid movetext, invalid result, and invalid setup consistently
+[info] - NotationParsers.resolve accepts known ids and rejects unknown ones
+[info] - Pgn.parse uses the default parser when no parser choice is supplied
+[info] - PGN parsers reject malformed structure and invalid promotion movetext
+[info] - PgnSupport.parseMoveToken safely rejects unsupported tokens
+[info] - PGN import and export handles all pawn promotion roles
+[info] - FastParse edge cases for PGN whitespace and structural elements
+[info] - RegexPgnParser skips leading empty lines correctly (collectTags tailrec)
+[info] - FastParse branch depth / failure cases for full coverage
+[info] ControllerSpec:
+[info] - Command.parse handles quit/help and empty
+[info] - Command.parse parses move and rejects bad format
+[info] - Command.parse handles fen command and rejects missing payload
+[info] - Controller.update returns messages and updates game
+[info] - Controller.update ends game with black winner on checkmate
+[info] - Controller.update sets position from FEN without showing FEN in output
+[info] - Controller.update ends game when set FEN is already checkmate
+[info] - Controller.update returns error when FEN parsing fails
+[info] - Controller parser selection persists in AppState and affects FEN/PGN workflows
+[info] - Controller.update reports parser selection and PGN import errors without changing state
+[info] - Controller.update supports explicit promotion moves
+[info] - Controller.update requires an explicit promotion choice in the TUI
+[info] Run completed in 509 milliseconds.
+[info] Total number of tests run: 87
+[info] Suites: completed 7, aborted 0
+[info] Tests: succeeded 82, failed 5, canceled 0, ignored 0, pending 0
+[info] *** 5 TESTS FAILED ***
+[error] Failed tests:
+[error] 	ch.tichess.view.GuiViewAdapterSpec
+[error] 	ch.tichess.model.FenSpec
+[error] 	ch.tichess.model.ModelSpec
+[error] 	ch.tichess.model.PgnSpec
+[error] (Test / test) sbt.TestsFailedException: Tests unsuccessful
+[error] Total time: 1 s, completed 14.04.2026, 23:25:39

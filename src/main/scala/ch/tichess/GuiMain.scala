@@ -82,6 +82,16 @@ object GuiMain extends JFXApp3:
       onAction = _ => updateState(GuiViewAdapter.cancelPromotion(state))
     }
 
+    val drawOfferButton = new Button("Remis anbieten") {
+      onAction = _ => updateState(GuiViewAdapter.drawOffer(state))
+    }
+
+    val drawAcceptButton = new Button("Remis annehmen") {
+      visible = false
+      managed = false
+      onAction = _ => updateState(GuiViewAdapter.drawAccept(state))
+    }
+
     val (boardGrid, squares) = buildBoardGrid(updateState, () => state)
     refreshUi = () =>
       render(
@@ -89,6 +99,8 @@ object GuiMain extends JFXApp3:
         promotionLabel,
         Seq(queenButton, rookButton, bishopButton, knightButton),
         cancelPromotionButton,
+        drawOfferButton,
+        drawAcceptButton,
         statusLabel,
         infoLabel,
         moveList,
@@ -174,6 +186,11 @@ object GuiMain extends JFXApp3:
             knightButton,
             cancelPromotionButton
           )
+        },
+        new HBox {
+          spacing = 8
+          alignment = FxPos.CenterLeft
+          children = Seq(drawOfferButton, drawAcceptButton)
         },
         statusLabel,
         infoLabel
@@ -270,6 +287,8 @@ object GuiMain extends JFXApp3:
       promotionLabel: Label,
       promotionButtons: Seq[Button],
       cancelPromotionButton: Button,
+      drawOfferButton: Button,
+      drawAcceptButton: Button,
       statusLabel: Label,
       infoLabel: Label,
       moveList: ListView[String],
@@ -282,6 +301,7 @@ object GuiMain extends JFXApp3:
     val legalTargets = state.legalTargetSquares
     val gameOver = state.isGameOver
     val promotionPending = state.pendingPromotion.nonEmpty
+    val drawPending = state.drawOfferedBy.nonEmpty && !state.drawAgreed
 
     promotionLabel.visible = promotionPending
     promotionLabel.managed = promotionPending
@@ -291,6 +311,10 @@ object GuiMain extends JFXApp3:
     }
     cancelPromotionButton.visible = promotionPending
     cancelPromotionButton.managed = promotionPending
+
+    drawOfferButton.disable = gameOver || promotionPending || drawPending
+    drawAcceptButton.visible = drawPending
+    drawAcceptButton.managed = drawPending
 
     squares.foreach { (pos, square) =>
       val pieceOpt = board.pieceAt(pos)

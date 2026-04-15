@@ -68,13 +68,13 @@ final class PgnSpec extends AnyFunSuite:
   }
 
   test("PGN export includes FEN only for non-standard starting positions and still round-trips") {
-    val customStart = Fen.parse("4k3/8/8/8/8/8/4P3/4K3 w").toOption.get
+    val customStart = Fen.parse("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1").toOption.get
     val customMoves = Vector(Move(Pos(4, 1), Pos(4, 3)))
     val exported = Pgn.encode(customStart, customMoves)
     val expected = replay(customStart, customMoves)
 
     assert(exported.contains("""[SetUp "1"]"""))
-    assert(exported.contains("""[FEN "4k3/8/8/8/8/8/4P3/4K3 w"]"""))
+    assert(exported.contains("""[FEN "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"]"""))
 
     NotationParsers.all.foreach { choice =>
       val imported = Pgn.parse(exported, choice).toOption.get
