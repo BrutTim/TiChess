@@ -14,6 +14,8 @@ enum Command:
   case Quit
   case DrawOffer
   case DrawAccept
+  case Resign
+  case NewGame
 
 object Command:
   def parse(input: String): Either[String, Command] =
@@ -40,6 +42,8 @@ object Command:
           case "h" | "help"          => Right(Command.Help)
           case "draw"                => Right(Command.DrawOffer)
           case "accept"              => Right(Command.DrawAccept)
+          case "resign" | "aufgeben" => Right(Command.Resign)
+          case "new" | "restart" | "neu" => Right(Command.NewGame)
           case _ =>
             val parts = trimmed.split("\\s+").toList
             parts match
@@ -61,7 +65,9 @@ final case class AppState(
     parserChoice: ParserChoice = NotationParsers.default,
     startGame: Game = Game.initial,
     moveHistory: Vector[Move] = Vector.empty,
-    drawOfferedBy: Option[Color] = None
+    drawOfferedBy: Option[Color] = None,
+    resignedBy: Option[Color] = None,
+    drawAgreed: Boolean = false
 )
 
 final case class UpdateResult(state: AppState, message: Option[String], quit: Boolean):
@@ -69,7 +75,7 @@ final case class UpdateResult(state: AppState, message: Option[String], quit: Bo
 
 object Controller:
   def initial: Game = Game.initial
-  def initialState: AppState = AppState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty, drawOfferedBy = None)
+  def initialState: AppState = AppState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty, drawOfferedBy = None, resignedBy = None, drawAgreed = false)
 
   private def colorLabel(c: Color): String = c match
     case Color.White => "White"
@@ -101,6 +107,8 @@ object Controller:
                                       "- PGN exportieren: `pgn export`",
                                       "- Remis anbieten: `draw`",
                                       "- Remis annehmen: `accept`",
+                                      "- Aufgeben: `resign`",
+                                      "- Neues Spiel: `new`",
                                       "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
                                     ).mkString("\n")), quit = false))
       case Right(Command.DrawOffer) =>
@@ -110,9 +118,18 @@ object Controller:
       case Right(Command.DrawAccept) =>
         state.drawOfferedBy match
           case Some(_) =>
-            Future.successful(UpdateResult(state, Some("Spiel durch Remis-Übereinkunft beendet."), quit = true))
+            val nextState = state.copy(drawAgreed = true, drawOfferedBy = None)
+            Future.successful(UpdateResult(nextState, Some("Spiel durch Remis-Übereinkunft beendet."), quit = true))
           case None =>
             Future.successful(UpdateResult(state, Some("Kein Remis-Angebot vorhanden."), quit = false))
+      case Right(Command.Resign) =>
+        val loser = state.game.sideToMove
+        val winner = loser.other
+        val nextState = state.copy(resignedBy = Some(loser))
+        Future.successful(UpdateResult(nextState, Some(s"${colorLabel(loser)} gibt auf. ${colorLabel(winner)} gewinnt!"), quit = true))
+      case Right(Command.NewGame) =>
+        val nextState = initialState
+        Future.successful(UpdateResult(nextState, Some("Neues Spiel gestartet."), quit = false))
       case Right(Command.Quit) =>
         Future.successful(UpdateResult(state, Some("Bye."), quit = true))
       case Right(Command.MoveCmd(mv)) =>

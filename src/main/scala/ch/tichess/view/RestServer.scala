@@ -78,6 +78,9 @@ object RestServer extends JsonSupport:
                 |        .square:active { transform: scale(0.95); }
                 |        .sq-light { background-color: var(--light-sq); }
                 |        .sq-dark { background-color: var(--dark-sq); }
+                |        .sq-legal { position: relative; }
+                |        .sq-legal::after { content: ''; position: absolute; width: 30%; height: 30%; background: rgba(0,0,0,0.2); border-radius: 50%; top: 35%; left: 35%; pointer-events: none; }
+                |        .sq-dark.sq-legal::after { background: rgba(255,255,255,0.2); }
                 |        .selected { background-color: var(--highlight) !important; box-shadow: inset 0 0 15px rgba(255,255,255,0.3); }
                 |        .modal-overlay {
                 |            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -109,11 +112,23 @@ object RestServer extends JsonSupport:
                 |        .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
                 |        .action-btn.accept { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); }
                 |        .action-btn.accept:hover:not(:disabled) { background: rgba(34,197,94,0.45); }
+                |        .action-btn.resign { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.5); }
+                |        .action-btn.resign:hover:not(:disabled) { background: rgba(239,68,68,0.45); }
+                |        .action-btn.new-game { background: rgba(59,130,246,0.25); border-color: rgba(59,130,246,0.5); }
+                |        .action-btn.new-game:hover:not(:disabled) { background: rgba(59,130,246,0.45); }
                 |        .captured-pieces { font-size: 1.25rem; min-height: 1.5rem; letter-spacing: 2px; color: var(--text-color); margin: 4px 0; }
+                |        .main-layout { display: flex; gap: 2rem; justify-content: center; align-items: flex-start; flex-wrap: wrap; max-width: 1200px; margin: 0 auto; }
+                |        .sidebar { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 1rem; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; min-width: 300px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }
+                |        .move-list { height: 250px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 0.5rem; padding: 0.5rem; font-family: monospace; font-size: 0.9rem; }
+                |        .move-list div { padding: 2px 4px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+                |        .notation-box { display: flex; flex-direction: column; gap: 0.5rem; }
+                |        .notation-text { width: 100%; height: 80px; background: rgba(0,0,0,0.2); color: var(--text-color); border: 1px solid var(--glass-border); border-radius: 0.5rem; padding: 0.5rem; font-family: monospace; resize: vertical; }
+                |        select { background: rgba(0,0,0,0.2); color: var(--text-color); border: 1px solid var(--glass-border); padding: 0.4rem; border-radius: 0.5rem; }
                 |    </style>
                 |</head>
                 |<body>
                 |
+                |<div class="main-layout">
                 |<div class="container">
                 |    <h1>TiChess Web GUI</h1>
                 |    <div id="status" class="status">Connecting...</div>
@@ -123,7 +138,24 @@ object RestServer extends JsonSupport:
                 |    <div class="action-bar">
                 |        <button id="btn-draw" class="action-btn" onclick="sendCommand('draw')">Remis anbieten</button>
                 |        <button id="btn-accept" class="action-btn accept" style="display:none" onclick="sendCommand('accept')">Remis annehmen ✓</button>
+                |        <button id="btn-resign" class="action-btn resign" onclick="sendCommand('resign')">Aufgeben 🏳</button>
+                |        <button id="btn-new" class="action-btn new-game" onclick="sendCommand('new')">Neues Spiel 🔄</button>
                 |    </div>
+                |</div>
+                |<div class="sidebar">
+                |    <h3>Notation / Parser</h3>
+                |    <select id="parser-select" onchange="sendCommand('parser ' + this.value)"></select>
+                |    <div id="move-list" class="move-list"></div>
+                |    <div class="notation-box">
+                |       <textarea id="notation-text" class="notation-text"></textarea>
+                |       <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                |         <button class="action-btn" onclick="sendCommand('fen export')">Export FEN</button>
+                |         <button class="action-btn" onclick="sendCommand('fen import ' + document.getElementById('notation-text').value)">Import FEN</button>
+                |         <button class="action-btn" onclick="sendCommand('pgn export')">Export PGN</button>
+                |         <button class="action-btn" onclick="sendCommand('pgn import ' + document.getElementById('notation-text').value)">Import PGN</button>
+                |       </div>
+                |    </div>
+                |</div>
                 |</div>
                 |
                 |<div id="promo-modal" class="modal-overlay">
@@ -145,7 +177,7 @@ object RestServer extends JsonSupport:
                 |        'n': { char: '&#x265E;&#xFE0E;', cls: 'piece-black' }, 'p': { char: '&#x265F;&#xFE0E;', cls: 'piece-black' }
                 |    };
                 |    let selectedIdx = null; let currentBoard = new Array(64).fill(null); let pendingPromoMove = null;
-                |    let isGameOver = false;
+                |    let isGameOver = false; let legalMovesData = {};
                 |    function algebraic(idx) {
                 |        const file = idx % 8; const rank = 7 - Math.floor(idx / 8);
                 |        return String.fromCharCode('a'.charCodeAt(0) + file) + (rank + 1);
@@ -159,10 +191,28 @@ object RestServer extends JsonSupport:
                 |            if (isGameOver) boardEl.classList.add('game-over'); else boardEl.classList.remove('game-over');
                 |            const btnDraw = document.getElementById('btn-draw');
                 |            const btnAccept = document.getElementById('btn-accept');
+                |            const btnResign = document.getElementById('btn-resign');
                 |            btnDraw.disabled = isGameOver || data.drawOffered;
                 |            btnAccept.style.display = data.drawOffered && !isGameOver ? 'inline-block' : 'none';
+                |            btnResign.disabled = isGameOver;
                 |            document.getElementById('white-captured').innerText = data.whiteCaptured || '';
                 |            document.getElementById('black-captured').innerText = data.blackCaptured || '';
+                |            legalMovesData = data.legalMoves || {};
+                |            const moveListEl = document.getElementById('move-list');
+                |            moveListEl.innerHTML = '';
+                |            (data.moveList || []).forEach(entry => {
+                |               const row = document.createElement('div'); row.innerText = entry;
+                |               moveListEl.appendChild(row);
+                |            });
+                |            moveListEl.scrollTop = moveListEl.scrollHeight;
+                |            const parserSelect = document.getElementById('parser-select');
+                |            if (parserSelect.options.length === 0) {
+                |                (data.availableParsers || []).forEach(p => {
+                |                    const opt = document.createElement('option'); opt.value = p; opt.innerText = p;
+                |                    parserSelect.appendChild(opt);
+                |                });
+                |            }
+                |            parserSelect.value = data.currentParser;
                 |            renderFen(data.fen);
                 |        } catch (e) { document.getElementById('status').innerText = "Connection lost."; }
                 |    }
@@ -182,6 +232,12 @@ object RestServer extends JsonSupport:
                 |            const sq = document.createElement('div');
                 |            sq.className = 'square ' + (isLight ? 'sq-light' : 'sq-dark');
                 |            if (selectedIdx === i) sq.classList.add('selected');
+                |            if (selectedIdx !== null) {
+                |                const alg = algebraic(selectedIdx);
+                |                if (legalMovesData[alg] && legalMovesData[alg].includes(algebraic(i))) {
+                |                    sq.classList.add('sq-legal');
+                |                }
+                |            }
                 |            const piece = currentBoard[i];
                 |            if (piece) sq.innerHTML = `<span class="${pieceMap[piece].cls}">${pieceMap[piece].char}</span>`;
                 |            sq.onclick = () => handleSquareClick(i);
@@ -219,7 +275,14 @@ object RestServer extends JsonSupport:
                 |        try {
                 |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: cmd }) });
                 |            const data = await res.json();
-                |            if (data.message) document.getElementById('status').innerText = data.message;
+                |            if (data.message) {
+                |               if (cmd.includes('export')) {
+                |                   document.getElementById('notation-text').value = data.message;
+                |                   document.getElementById('status').innerText = "Exported.";
+                |               } else {
+                |                   document.getElementById('status').innerText = data.message;
+                |               }
+                |            }
                 |            fetchGame();
                 |        } catch (e) { console.error(e); }
                 |    }
@@ -289,7 +352,14 @@ object RestServer extends JsonSupport:
         pathPrefix("api" / "view") {
           get {
             path("game") {
-              val guiState = GuiViewState(appState.game, startGame = appState.startGame)
+              val guiState = GuiViewState(
+                appState.game,
+                startGame = appState.startGame,
+                drawAgreed = appState.drawAgreed,
+                resignedBy = appState.resignedBy,
+                selectedParserId = appState.parserChoice.id,
+                moveHistory = appState.moveHistory
+              )
               val adv = guiState.materialAdvantage
               def capChar(kind: ch.tichess.model.PieceType): String = kind match
                 case ch.tichess.model.PieceType.Pawn   => "♟"
@@ -302,13 +372,26 @@ object RestServer extends JsonSupport:
                 val symbols = pieces.map(capChar).mkString
                 val advStr = if showAdv then s" +${Math.abs(adv)}" else ""
                 if symbols.isEmpty && !showAdv then "" else s"$symbols$advStr"
+
+              val legalOptMap = (for {
+                r <- 0 to 7
+                c <- 0 to 7
+                pos = ch.tichess.model.Pos(c, r)
+              } yield pos.toAlgebraic -> appState.game.legalMoves.filter(_.from == pos).map(_.to.toAlgebraic).toList).toMap
+
+              val validLegalMap = legalOptMap.filter(_._2.nonEmpty)
+
               complete(StateResponse(
                 Fen.encode(appState.game),
                 guiState.statusText,
                 guiState.isGameOver,
                 appState.drawOfferedBy.nonEmpty,
                 capDisplay(guiState.capturedByWhite, adv > 0),
-                capDisplay(guiState.capturedByBlack, adv < 0)
+                capDisplay(guiState.capturedByBlack, adv < 0),
+                guiState.moveEntries.toList,
+                validLegalMap,
+                appState.parserChoice.id,
+                ch.tichess.model.NotationParsers.ids.toList
               ))
             }
           }

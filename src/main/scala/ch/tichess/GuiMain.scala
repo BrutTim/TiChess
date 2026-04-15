@@ -92,6 +92,16 @@ object GuiMain extends JFXApp3:
       onAction = _ => updateState(GuiViewAdapter.drawAccept(state))
     }
 
+    val resignButton = new Button("Aufgeben") {
+      style = "-fx-background-color: #ef4444; -fx-text-fill: white;"
+      onAction = _ => updateState(GuiViewAdapter.resign(state))
+    }
+
+    val newGameButton = new Button("Neues Spiel") {
+      style = "-fx-background-color: #3b82f6; -fx-text-fill: white;"
+      onAction = _ => updateState(GuiViewAdapter.newGame())
+    }
+
     val blackCapturedLabel = new Label {
       style = "-fx-font-size: 18px;"
     }
@@ -108,6 +118,8 @@ object GuiMain extends JFXApp3:
         cancelPromotionButton,
         drawOfferButton,
         drawAcceptButton,
+        resignButton,
+        newGameButton,
         statusLabel,
         infoLabel,
         moveList,
@@ -204,7 +216,7 @@ object GuiMain extends JFXApp3:
         new HBox {
           spacing = 8
           alignment = FxPos.CenterLeft
-          children = Seq(drawOfferButton, drawAcceptButton)
+          children = Seq(drawOfferButton, drawAcceptButton, resignButton, newGameButton)
         },
         statusLabel,
         infoLabel
@@ -303,6 +315,8 @@ object GuiMain extends JFXApp3:
       cancelPromotionButton: Button,
       drawOfferButton: Button,
       drawAcceptButton: Button,
+      resignButton: Button,
+      newGameButton: Button,
       statusLabel: Label,
       infoLabel: Label,
       moveList: ListView[String],
@@ -331,6 +345,8 @@ object GuiMain extends JFXApp3:
     drawOfferButton.disable = gameOver || promotionPending || drawPending
     drawAcceptButton.visible = drawPending
     drawAcceptButton.managed = drawPending
+
+    resignButton.disable = gameOver
 
     squares.foreach { (pos, square) =>
       val pieceOpt = board.pieceAt(pos)

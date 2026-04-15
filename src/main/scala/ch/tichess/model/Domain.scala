@@ -36,6 +36,7 @@ final case class Piece(color: Color, kind: PieceType)
 final case class Pos(file: Int, rank: Int):
   def inBounds: Boolean = file >= 0 && file < 8 && rank >= 0 && rank < 8
   def +(d: (Int, Int)): Pos = Pos(file + d._1, rank + d._2)
+  def toAlgebraic: String = s"${(file + 'a').toChar}${rank + 1}"
 
 object Pos:
   def fromAlgebraic(s: String): Either[String, Pos] =

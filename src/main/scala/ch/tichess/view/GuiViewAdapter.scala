@@ -16,15 +16,17 @@ final case class GuiViewState(
     selectedParserId: String = NotationParsers.default.id,
     notationText: String = "",
     drawOfferedBy: Option[Color] = None,
-    drawAgreed: Boolean = false
+    drawAgreed: Boolean = false,
+    resignedBy: Option[Color] = None
 ):
-  def isGameOver: Boolean = game.isCheckmate || game.isDraw || drawAgreed
+  def isGameOver: Boolean = game.isCheckmate || game.isDraw || drawAgreed || resignedBy.isDefined
 
   def parserChoice: ParserChoice =
     NotationParsers.resolve(selectedParserId).getOrElse(NotationParsers.default)
 
   def statusText: String =
     if drawAgreed then "Remis - Einigung"
+    else if resignedBy.isDefined then s"${GuiViewAdapter.colorLabel(resignedBy.get)} hat aufgegeben. ${GuiViewAdapter.colorLabel(resignedBy.get.other)} gewinnt!"
     else if game.isCheckmate then s"Schachmatt - ${GuiViewAdapter.colorLabel(game.sideToMove.other)} gewinnt"
     else if game.isDraw then
       if game.halfMoveClock >= 100 then "Remis - 50-Züge-Regel"
@@ -175,6 +177,16 @@ object GuiViewAdapter:
         )
       case None =>
         state.copy(infoMessage = Some("Kein Remis-Angebot vorhanden."))
+
+  def resign(state: GuiViewState): GuiViewState =
+    if state.isGameOver then state
+    else
+      val loser = state.game.sideToMove
+      val winner = loser.other
+      clearSelection(state.copy(resignedBy = Some(loser), infoMessage = Some(s"${colorLabel(loser)} gibt auf. ${colorLabel(winner)} gewinnt!")))
+
+  def newGame(): GuiViewState =
+    GuiViewState.initial.copy(infoMessage = Some("Neues Spiel gestartet."))
 
   private def select(state: GuiViewState, pos: Pos): GuiViewState =
     state.copy(
