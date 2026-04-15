@@ -109,6 +109,7 @@ object RestServer extends JsonSupport:
                 |        .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
                 |        .action-btn.accept { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); }
                 |        .action-btn.accept:hover:not(:disabled) { background: rgba(34,197,94,0.45); }
+                |        .captured-pieces { font-size: 1.25rem; min-height: 1.5rem; letter-spacing: 2px; color: var(--text-color); margin: 4px 0; }
                 |    </style>
                 |</head>
                 |<body>
@@ -116,7 +117,9 @@ object RestServer extends JsonSupport:
                 |<div class="container">
                 |    <h1>TiChess Web GUI</h1>
                 |    <div id="status" class="status">Connecting...</div>
+                |    <div id="black-captured" class="captured-pieces"></div>
                 |    <div id="board" class="board"></div>
+                |    <div id="white-captured" class="captured-pieces"></div>
                 |    <div class="action-bar">
                 |        <button id="btn-draw" class="action-btn" onclick="sendCommand('draw')">Remis anbieten</button>
                 |        <button id="btn-accept" class="action-btn accept" style="display:none" onclick="sendCommand('accept')">Remis annehmen ✓</button>
@@ -158,6 +161,8 @@ object RestServer extends JsonSupport:
                 |            const btnAccept = document.getElementById('btn-accept');
                 |            btnDraw.disabled = isGameOver || data.drawOffered;
                 |            btnAccept.style.display = data.drawOffered && !isGameOver ? 'inline-block' : 'none';
+                |            document.getElementById('white-captured').innerText = data.whiteCaptured || '';
+                |            document.getElementById('black-captured').innerText = data.blackCaptured || '';
                 |            renderFen(data.fen);
                 |        } catch (e) { document.getElementById('status').innerText = "Connection lost."; }
                 |    }
@@ -286,6 +291,13 @@ object RestServer extends JsonSupport:
             path("game") {
               val guiState = GuiViewState(appState.game, startGame = appState.startGame)
               val adv = guiState.materialAdvantage
+              def capChar(kind: ch.tichess.model.PieceType): String = kind match
+                case ch.tichess.model.PieceType.Pawn   => "♟"
+                case ch.tichess.model.PieceType.Knight => "♞"
+                case ch.tichess.model.PieceType.Bishop => "♝"
+                case ch.tichess.model.PieceType.Rook   => "♜"
+                case ch.tichess.model.PieceType.Queen  => "♛"
+                case ch.tichess.model.PieceType.King   => "♚"
               def capDisplay(pieces: List[ch.tichess.model.PieceType], showAdv: Boolean): String =
                 val symbols = pieces.map(capChar).mkString
                 val advStr = if showAdv then s" +${Math.abs(adv)}" else ""
