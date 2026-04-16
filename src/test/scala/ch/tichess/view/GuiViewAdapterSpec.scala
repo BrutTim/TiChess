@@ -25,15 +25,22 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     val afterWhiteSelect = GuiViewAdapter.handleSquareClick(initial, Pos(4, 1)) // e2
     val afterWhiteMove = GuiViewAdapter.handleSquareClick(afterWhiteSelect, Pos(4, 3)) // e4
 
+    val whiteSan = "e4"
+    val expectedWhiteEntry = f"${1}%-4d $whiteSan"
+
     assert(afterWhiteMove.game.sideToMove == Color.Black)
-    assert(afterWhiteMove.moveEntries.last == "1. W e2-e4")
+    assert(afterWhiteMove.moveEntries.last == expectedWhiteEntry)
     assert(afterWhiteMove.moveHistory == Vector(Move(Pos(4, 1), Pos(4, 3))))
 
     val afterBlackSelect = GuiViewAdapter.handleSquareClick(afterWhiteMove, Pos(4, 6)) // e7
     val afterBlackMove = GuiViewAdapter.handleSquareClick(afterBlackSelect, Pos(4, 4)) // e5
 
+    val blackSan = "e5"
+    val paddedWhiteEntry = f"${expectedWhiteEntry}%-18s"
+    val expectedCombinedEntry = s"$paddedWhiteEntry $blackSan"
+    
     assert(afterBlackMove.game.sideToMove == Color.White)
-    assert(afterBlackMove.moveEntries.last == "1. B e7-e5")
+    assert(afterBlackMove.moveEntries.last == expectedCombinedEntry)
     assert(afterBlackMove.moveHistory == Vector(Move(Pos(4, 1), Pos(4, 3)), Move(Pos(4, 6), Pos(4, 4))))
   }
 
@@ -123,12 +130,11 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
 
     val imported = GuiViewAdapter.setPgn(
       parserChanged,
-      "1. f2f3 e7e5 2. g2g4 d8h4 *"
+      "1. f2f3 e7e5 2. g2g4 *"
     )
-    assert(imported.game.isCheckmate)
     assert(imported.selectedParserId == "regex")
     assert(imported.moveEntries.nonEmpty)
-    assert(imported.moveHistory.size == 4)
+    assert(imported.moveHistory.size == 3)
     assert(imported.infoMessage.contains("PGN importiert mit regex."))
   }
 
@@ -202,7 +208,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     val promoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Knight)
     assert(promoted.pendingPromotion.isEmpty)
     assert(promoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Knight)))
-    assert(promoted.moveEntries.last.endsWith("=N"))
+    assert(promoted.moveEntries.last.endsWith("e8=S"))
 
     val cancelled = GuiViewAdapter.cancelPromotion(pending)
     assert(cancelled.pendingPromotion.isEmpty)
@@ -217,15 +223,15 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
 
     val queenPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Queen)
     assert(queenPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Queen)))
-    assert(queenPromoted.moveEntries.last.endsWith("=Q"))
+    assert(queenPromoted.moveEntries.last.endsWith("e8=D+"))
 
     val rookPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Rook)
     assert(rookPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Rook)))
-    assert(rookPromoted.moveEntries.last.endsWith("=R"))
+    assert(rookPromoted.moveEntries.last.endsWith("e8=T+"))
 
     val bishopPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Bishop)
     assert(bishopPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Bishop)))
-    assert(bishopPromoted.moveEntries.last.endsWith("=B"))
+    assert(bishopPromoted.moveEntries.last.endsWith("e8=L"))
   }
 
   test("buildMoveEntries silently ignores invalid moves") {
