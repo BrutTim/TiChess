@@ -112,6 +112,8 @@ object RestServer extends JsonSupport:
                 |        .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
                 |        .action-btn.accept { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); }
                 |        .action-btn.accept:hover:not(:disabled) { background: rgba(34,197,94,0.45); }
+                |        .action-btn.decline { background: rgba(249,115,22,0.25); border-color: rgba(249,115,22,0.5); }
+                |        .action-btn.decline:hover:not(:disabled) { background: rgba(249,115,22,0.45); }
                 |        .action-btn.resign { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.5); }
                 |        .action-btn.resign:hover:not(:disabled) { background: rgba(239,68,68,0.45); }
                 |        .action-btn.new-game { background: rgba(59,130,246,0.25); border-color: rgba(59,130,246,0.5); }
@@ -138,6 +140,7 @@ object RestServer extends JsonSupport:
                 |    <div class="action-bar">
                 |        <button id="btn-draw" class="action-btn" onclick="sendCommand('draw')">Remis anbieten</button>
                 |        <button id="btn-accept" class="action-btn accept" style="display:none" onclick="sendCommand('accept')">Remis annehmen ✓</button>
+                |        <button id="btn-decline" class="action-btn decline" style="display:none" onclick="sendCommand('decline')">Remis ablehnen ✗</button>
                 |        <button id="btn-resign" class="action-btn resign" onclick="sendCommand('resign')">Aufgeben 🏳</button>
                 |        <button id="btn-new" class="action-btn new-game" onclick="sendCommand('new')">Neues Spiel 🔄</button>
                 |    </div>
@@ -193,7 +196,9 @@ object RestServer extends JsonSupport:
                 |            const btnAccept = document.getElementById('btn-accept');
                 |            const btnResign = document.getElementById('btn-resign');
                 |            btnDraw.disabled = isGameOver || data.drawOffered;
-                |            btnAccept.style.display = data.drawOffered && !isGameOver ? 'inline-block' : 'none';
+                |            const showDrawResponse = data.drawOffered && !isGameOver;
+                |            btnAccept.style.display = showDrawResponse ? 'inline-block' : 'none';
+                |            document.getElementById('btn-decline').style.display = showDrawResponse ? 'inline-block' : 'none';
                 |            btnResign.disabled = isGameOver;
                 |            document.getElementById('white-captured').innerText = data.whiteCaptured || '';
                 |            document.getElementById('black-captured').innerText = data.blackCaptured || '';

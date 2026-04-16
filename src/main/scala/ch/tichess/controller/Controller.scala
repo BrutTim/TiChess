@@ -14,6 +14,7 @@ enum Command:
   case Quit
   case DrawOffer
   case DrawAccept
+  case DrawDecline
   case Resign
   case NewGame
 
@@ -42,6 +43,7 @@ object Command:
           case "h" | "help"          => Right(Command.Help)
           case "draw"                => Right(Command.DrawOffer)
           case "accept"              => Right(Command.DrawAccept)
+          case "decline" | "ablehnen" => Right(Command.DrawDecline)
           case "resign" | "aufgeben" => Right(Command.Resign)
           case "new" | "restart" | "neu" => Right(Command.NewGame)
           case _ =>
@@ -107,19 +109,37 @@ object Controller:
                                       "- PGN exportieren: `pgn export`",
                                       "- Remis anbieten: `draw`",
                                       "- Remis annehmen: `accept`",
+                                      "- Remis ablehnen: `decline`",
                                       "- Aufgeben: `resign`",
                                       "- Neues Spiel: `new`",
                                       "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
                                     ).mkString("\n")), quit = false))
       case Right(Command.DrawOffer) =>
-        val offerer = state.game.sideToMove
-        val nextState = state.copy(drawOfferedBy = Some(offerer))
-        Future.successful(UpdateResult(nextState, Some(s"${colorLabel(offerer)} bietet Remis an. Zum Annehmen 'accept' eingeben."), quit = false))
+        if state.drawOfferedBy.isDefined then
+          Future.successful(UpdateResult(state, Some("Es gibt bereits ein offenes Remis-Angebot."), quit = false))
+        else
+          val offerer = state.game.sideToMove
+          // Flip side to move so the opponent must respond
+          val nextGame = state.game.copy(sideToMove = offerer.other)
+          val nextState = state.copy(game = nextGame, drawOfferedBy = Some(offerer))
+          Future.successful(UpdateResult(nextState, Some(s"${colorLabel(offerer)} bietet Remis an. ${colorLabel(offerer.other)}: 'accept' oder 'decline' eingeben."), quit = false))
       case Right(Command.DrawAccept) =>
         state.drawOfferedBy match
+          case Some(offerer) if offerer == state.game.sideToMove =>
+            // The offerer is somehow still/again active – shouldn't normally happen
+            Future.successful(UpdateResult(state, Some("Du kannst dein eigenes Remis-Angebot nicht annehmen."), quit = false))
           case Some(_) =>
             val nextState = state.copy(drawAgreed = true, drawOfferedBy = None)
             Future.successful(UpdateResult(nextState, Some("Spiel durch Remis-Übereinkunft beendet."), quit = true))
+          case None =>
+            Future.successful(UpdateResult(state, Some("Kein Remis-Angebot vorhanden."), quit = false))
+      case Right(Command.DrawDecline) =>
+        state.drawOfferedBy match
+          case Some(offerer) =>
+            // Flip back to the offerer's turn
+            val nextGame = state.game.copy(sideToMove = offerer)
+            val nextState = state.copy(game = nextGame, drawOfferedBy = None)
+            Future.successful(UpdateResult(nextState, Some(s"Remis-Angebot abgelehnt. ${colorLabel(offerer)} ist wieder am Zug."), quit = false))
           case None =>
             Future.successful(UpdateResult(state, Some("Kein Remis-Angebot vorhanden."), quit = false))
       case Right(Command.Resign) =>
@@ -132,6 +152,8 @@ object Controller:
         Future.successful(UpdateResult(nextState, Some("Neues Spiel gestartet."), quit = false))
       case Right(Command.Quit) =>
         Future.successful(UpdateResult(state, Some("Bye."), quit = true))
+      case Right(Command.MoveCmd(_)) if state.drawOfferedBy.isDefined =>
+        Future.successful(UpdateResult(state, Some("Remis-Angebot ausstehend. Bitte 'accept' oder 'decline' eingeben."), quit = false))
       case Right(Command.MoveCmd(mv)) =>
         modelService.applyMove(state.game, mv).map {
           case Left(err)     => UpdateResult(state, Some(err), quit = false)

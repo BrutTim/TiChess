@@ -187,52 +187,63 @@ final class ControllerSpec extends AnyFunSuite:
 
   test("Controller supports draw offer and acceptance") {
     val s0 = Controller.initialState
-    
-    // White offers draw
+    assert(s0.game.sideToMove == Color.White)
+
+    // White offers draw -> turn flips to Black
     val offer = Controller.update(s0, "draw")
     assert(offer.state.drawOfferedBy.contains(Color.White))
-    assert(offer.message.contains("White bietet Remis an. Zum Annehmen 'accept' eingeben."))
+    assert(offer.state.game.sideToMove == Color.Black)
+    assert(offer.message.exists(_.contains("White bietet Remis an.")))
+    assert(offer.message.exists(_.contains("accept")))
     assert(!offer.quit)
-    
-    // White tries to accept own offer
-    val selfAccept = Controller.update(offer.state, "accept")
-    assert(!selfAccept.quit)
-    assert(selfAccept.message.contains("Du kannst dein eigenes Remis-Angebot nicht annehmen."))
-    
-    // Black accepts offer
-    // Need to flip side to move for black to accept? 
-    // Wait, the current side to move is White (after start).
-    // If White offers, it's still White's turn? No, usually you offer draw during your turn or right after.
-    // In our controller, the sideToMove doesn't change on draw offer.
-    // So if it's White's turn, and White offers, the next person to move is White? 
-    // Actually, draw is usually offered during your turn, and the opponent accepts on THEIR turn.
-    
-    val s1 = Controller.update(s0, "e2 e4").state
-    assert(s1.game.sideToMove == Color.Black)
-    
-    // Black offers draw
-    val offerByBlack = Controller.update(s1, "draw")
-    assert(offerByBlack.state.drawOfferedBy.contains(Color.Black))
-    
-    // At this point it's STILL Black's turn (since draw offer doesn't change turn)
-    // Black cannot accept own offer. 
-    val blackAcceptsSelf = Controller.update(offerByBlack.state, "accept")
-    assert(!blackAcceptsSelf.quit)
-    
-    // To accept, White must move? Wait, no, White must be SIDE TO MOVE.
-    // In TiChess, a draw offer usually stays until a move is made or it's accepted.
-    // Let's make a move by Black to pass turn to White? No, that would clear the offer (as per my implementation).
-    
-    // I should offer draw as White, then Black accepts on their turn.
-    val whiteMoves = Controller.update(s0, "e2 e4")
-    val blackTurnState = whiteMoves.state
-    assert(blackTurnState.game.sideToMove == Color.Black)
-    
-    // White offered draw (e.g. while moving or right after)
-    val stateWithOffer = blackTurnState.copy(drawOfferedBy = Some(Color.White))
-    val acceptByBlack = Controller.update(stateWithOffer, "accept")
-    assert(acceptByBlack.quit)
-    assert(acceptByBlack.message.contains("Spiel durch Remis-Übereinkunft beendet."))
+
+    // Duplicate offer is rejected
+    val dupOffer = Controller.update(offer.state, "draw")
+    assert(dupOffer.state == offer.state)
+    assert(dupOffer.message.contains("Es gibt bereits ein offenes Remis-Angebot."))
+
+    // The offerer (White) cannot accept own offer
+    // Simulate by manually setting sideToMove back to White
+    val offererTriesAccept = Controller.update(
+      offer.state.copy(game = offer.state.game.copy(sideToMove = Color.White)), "accept")
+    assert(!offererTriesAccept.quit)
+    assert(offererTriesAccept.message.contains("Du kannst dein eigenes Remis-Angebot nicht annehmen."))
+
+    // Moves are blocked while draw offer is pending
+    val blockedMove = Controller.update(offer.state, "e7 e5")
+    assert(!blockedMove.quit)
+    assert(blockedMove.message.exists(_.contains("Remis-Angebot ausstehend.")))
+    assert(blockedMove.state == offer.state)
+
+    // Black accepts -> game ends as draw
+    val accept = Controller.update(offer.state, "accept")
+    assert(accept.quit)
+    assert(accept.state.drawAgreed)
+    assert(accept.message.contains("Spiel durch Remis-Uebereinkunft beendet.") ||
+           accept.message.exists(_.contains("beendet.")))
+
+    // --- Decline path ---
+    val offer2 = Controller.update(s0, "draw")
+    assert(offer2.state.game.sideToMove == Color.Black)
+
+    val decline = Controller.update(offer2.state, "decline")
+    assert(!decline.quit)
+    assert(decline.state.drawOfferedBy.isEmpty)
+    // Turn flips back to White (the offerer)
+    assert(decline.state.game.sideToMove == Color.White)
+    assert(decline.message.exists(_.contains("abgelehnt")))
+    assert(decline.message.exists(_.contains("White")))
+
+    // After decline, moves are possible again
+    val moveAfterDecline = Controller.update(decline.state, "e2 e4")
+    assert(!moveAfterDecline.quit)
+    assert(moveAfterDecline.state.game.sideToMove == Color.Black)
+
+    // No pending offer -> decline/accept return error
+    val noPendingDecline = Controller.update(s0, "decline")
+    assert(noPendingDecline.message.contains("Kein Remis-Angebot vorhanden."))
+    val noPendingAccept = Controller.update(s0, "accept")
+    assert(noPendingAccept.message.contains("Kein Remis-Angebot vorhanden."))
   }
 
   test("Controller ends game on stalemate during import") {

@@ -75,7 +75,7 @@ object GuiViewAdapter:
     !state.isGameOver && state.game.board.pieceAt(pos).exists(_.color == state.game.sideToMove)
 
   def handleSquareClick(state: GuiViewState, pos: Pos): GuiViewState =
-    if state.isGameOver || state.pendingPromotion.nonEmpty then state
+    if state.isGameOver || state.pendingPromotion.nonEmpty || state.drawOfferedBy.isDefined then state
     else
       state.selectedPos match
         case None =>
@@ -160,20 +160,40 @@ object GuiViewAdapter:
 
   def drawOffer(state: GuiViewState): GuiViewState =
     if state.isGameOver then state
+    else if state.drawOfferedBy.isDefined then
+      state.copy(infoMessage = Some("Es gibt bereits ein offenes Remis-Angebot."))
     else
       val offerer = state.game.sideToMove
+      // Flip side to move so the opponent must respond
+      val nextGame = state.game.copy(sideToMove = offerer.other)
       state.copy(
+        game = nextGame,
         drawOfferedBy = Some(offerer),
-        infoMessage = Some(s"${colorLabel(offerer)} bietet Remis an. Zum Annehmen 'Remis annehmen' klicken.")
+        infoMessage = Some(s"${colorLabel(offerer)} bietet Remis an. ${colorLabel(offerer.other)}: Annehmen oder Ablehnen.")
       )
 
   def drawAccept(state: GuiViewState): GuiViewState =
     state.drawOfferedBy match
+      case Some(offerer) if offerer == state.game.sideToMove =>
+        state.copy(infoMessage = Some("Du kannst dein eigenes Remis-Angebot nicht annehmen."))
       case Some(_) =>
         state.copy(
           drawAgreed = true,
           drawOfferedBy = None,
           infoMessage = Some("Spiel durch Remis-Übereinkunft beendet.")
+        )
+      case None =>
+        state.copy(infoMessage = Some("Kein Remis-Angebot vorhanden."))
+
+  def drawDecline(state: GuiViewState): GuiViewState =
+    state.drawOfferedBy match
+      case Some(offerer) =>
+        // Flip back to the offerer's turn
+        val nextGame = state.game.copy(sideToMove = offerer)
+        state.copy(
+          game = nextGame,
+          drawOfferedBy = None,
+          infoMessage = Some(s"Remis-Angebot abgelehnt. ${colorLabel(offerer)} ist wieder am Zug.")
         )
       case None =>
         state.copy(infoMessage = Some("Kein Remis-Angebot vorhanden."))

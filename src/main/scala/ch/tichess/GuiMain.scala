@@ -92,6 +92,13 @@ object GuiMain extends JFXApp3:
       onAction = _ => updateState(GuiViewAdapter.drawAccept(state))
     }
 
+    val drawDeclineButton = new Button("Remis ablehnen") {
+      style = "-fx-background-color: #f97316; -fx-text-fill: white;"
+      visible = false
+      managed = false
+      onAction = _ => updateState(GuiViewAdapter.drawDecline(state))
+    }
+
     val resignButton = new Button("Aufgeben") {
       style = "-fx-background-color: #ef4444; -fx-text-fill: white;"
       onAction = _ => updateState(GuiViewAdapter.resign(state))
@@ -118,6 +125,7 @@ object GuiMain extends JFXApp3:
         cancelPromotionButton,
         drawOfferButton,
         drawAcceptButton,
+        drawDeclineButton,
         resignButton,
         newGameButton,
         statusLabel,
@@ -216,7 +224,7 @@ object GuiMain extends JFXApp3:
         new HBox {
           spacing = 8
           alignment = FxPos.CenterLeft
-          children = Seq(drawOfferButton, drawAcceptButton, resignButton, newGameButton)
+          children = Seq(drawOfferButton, drawAcceptButton, drawDeclineButton, resignButton, newGameButton)
         },
         statusLabel,
         infoLabel
@@ -315,6 +323,7 @@ object GuiMain extends JFXApp3:
       cancelPromotionButton: Button,
       drawOfferButton: Button,
       drawAcceptButton: Button,
+      drawDeclineButton: Button,
       resignButton: Button,
       newGameButton: Button,
       statusLabel: Label,
@@ -345,6 +354,8 @@ object GuiMain extends JFXApp3:
     drawOfferButton.disable = gameOver || promotionPending || drawPending
     drawAcceptButton.visible = drawPending
     drawAcceptButton.managed = drawPending
+    drawDeclineButton.visible = drawPending
+    drawDeclineButton.managed = drawPending
 
     resignButton.disable = gameOver
 
