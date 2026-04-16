@@ -363,7 +363,8 @@ object RestServer extends JsonSupport:
                 drawAgreed = appState.drawAgreed,
                 resignedBy = appState.resignedBy,
                 selectedParserId = appState.parserChoice.id,
-                moveHistory = appState.moveHistory
+                moveHistory = appState.moveHistory,
+                moveEntries = GuiViewAdapter.buildMoveEntries(appState.startGame, appState.moveHistory)
               )
               val adv = guiState.materialAdvantage
               def capChar(kind: ch.tichess.model.PieceType): String = kind match
