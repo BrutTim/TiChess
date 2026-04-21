@@ -4,24 +4,22 @@ import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives.*
-import scala.concurrent.ExecutionContextExecutor
-import scala.util.{Failure, Success}
+import ch.tichess.services.{ControllerHttpClient, ServiceConfig}
 
-import ch.tichess.model.{Fen, Game}
-import ch.tichess.controller.{Controller, Command, AppState}
-import ch.tichess.services.{LocalModelService, LocalControllerService, ModelService, ControllerService}
+import scala.concurrent.Await
+import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.duration.Duration
+import scala.util.{Failure, Success}
 
 object RestServer extends JsonSupport:
 
   def main(args: Array[String]): Unit =
-    implicit val system: ActorSystem[Nothing] = ActorSystem(Behaviors.empty, "TiChessRestAPI")
+    implicit val system: ActorSystem[Nothing] = ActorSystem(Behaviors.empty, "TiChessViewService")
     implicit val executionContext: ExecutionContextExecutor = system.executionContext
-    
-    val modelService: ModelService = new LocalModelService()
-    val controllerService: ControllerService = new LocalControllerService(modelService)
-    
-    // Mutable state for the REST Server just like the TUI loop
-    var appState: AppState = Controller.initialState
+
+    val controllerServiceUrl = ServiceConfig.url("CONTROLLER_SERVICE_URL", "http://localhost:8082")
+    val controllerClient = new ControllerHttpClient(controllerServiceUrl)
+    val port = ServiceConfig.port("VIEW_SERVICE_PORT", 8080)
 
     val route =
       concat(
@@ -301,48 +299,12 @@ object RestServer extends JsonSupport:
             ))
           }
         },
-        // ============================================
-        // 1. Model Server API (Functional Engine Logic)
-        // ============================================
-        pathPrefix("api" / "model") {
-          post {
-            path("applyMove") {
-              entity(as[MoveRequest]) { req =>
-                Fen.parse(req.fen) match
-                  case Left(err) => 
-                    complete(ModelResponse(success = false, None, Some(s"Invalid FEN: $err")))
-                  case Right(game) =>
-                    // We cheat a bit by using Command.parse here to extract the algebraic Move,
-                    // but normally a clean DTO "from: a2, to: a4" is sufficient.
-                     Command.parse(req.algebraicMove) match
-                        case Right(Command.MoveCmd(move)) =>
-                             onComplete(modelService.applyMove(game, move)) {
-                               case Success(Right(nextGame)) => 
-                                   complete(ModelResponse(success = true, Some(Fen.encode(nextGame)), None))
-                               case Success(Left(err)) => 
-                                   complete(ModelResponse(success = false, None, Some(err)))
-                               case Failure(ex) => 
-                                   complete(ModelResponse(success = false, None, Some(ex.getMessage)))
-                             }
-                        case _ => 
-                            complete(ModelResponse(success = false, None, Some("Invalid algebraic move.")))
-              }
-            }
-          }
-        },
-
-        // ============================================
-        // 2. Controller API (State-mutating Logic)
-        // ============================================
         pathPrefix("api" / "controller") {
           post {
             path("update") {
               entity(as[CommandRequest]) { req =>
-                onComplete(controllerService.update(appState, req.input)) {
-                   case Success(res) =>
-                      // Update the internal server state
-                      appState = res.state
-                      complete(CommandResponse(success = true, res.message, Some(Fen.encode(res.game)), res.quit))
+                onComplete(controllerClient.update(req.input)) {
+                   case Success(res) => complete(res)
                    case Failure(ex) =>
                       complete(CommandResponse(success = false, Some(ex.getMessage), None, false))
                 }
@@ -350,71 +312,35 @@ object RestServer extends JsonSupport:
             }
           }
         },
-
-        // ============================================
-        // 3. View API (Read-Only Representation layer)
-        // ============================================
         pathPrefix("api" / "view") {
           get {
             path("game") {
-              val guiState = GuiViewState(
-                appState.game,
-                startGame = appState.startGame,
-                drawAgreed = appState.drawAgreed,
-                resignedBy = appState.resignedBy,
-                selectedParserId = appState.parserChoice.id,
-                moveHistory = appState.moveHistory,
-                moveEntries = GuiViewAdapter.buildMoveEntries(appState.startGame, appState.moveHistory)
-              )
-              val adv = guiState.materialAdvantage
-              def capChar(kind: ch.tichess.model.PieceType): String = kind match
-                case ch.tichess.model.PieceType.Pawn   => "♟"
-                case ch.tichess.model.PieceType.Knight => "♞"
-                case ch.tichess.model.PieceType.Bishop => "♝"
-                case ch.tichess.model.PieceType.Rook   => "♜"
-                case ch.tichess.model.PieceType.Queen  => "♛"
-                case ch.tichess.model.PieceType.King   => "♚"
-              def capDisplay(pieces: List[ch.tichess.model.PieceType], showAdv: Boolean): String =
-                val symbols = pieces.map(capChar).mkString
-                val advStr = if showAdv then s" +${Math.abs(adv)}" else ""
-                if symbols.isEmpty && !showAdv then "" else s"$symbols$advStr"
-
-              val legalOptMap = (for {
-                r <- 0 to 7
-                c <- 0 to 7
-                pos = ch.tichess.model.Pos(c, r)
-              } yield pos.toAlgebraic -> appState.game.legalMoves.filter(_.from == pos).map(_.to.toAlgebraic).toList).toMap
-
-              val validLegalMap = legalOptMap.filter(_._2.nonEmpty)
-
-              complete(StateResponse(
-                Fen.encode(appState.game),
-                guiState.statusText,
-                guiState.isGameOver,
-                appState.drawOfferedBy.nonEmpty,
-                capDisplay(guiState.capturedByWhite, adv > 0),
-                capDisplay(guiState.capturedByBlack, adv < 0),
-                guiState.moveEntries.toList,
-                validLegalMap,
-                appState.parserChoice.id,
-                ch.tichess.model.NotationParsers.ids.toList
-              ))
+              onComplete(controllerClient.fetchState()) {
+                case Success(state) => complete(state)
+                case Failure(ex) =>
+                  complete(
+                    StateResponse(
+                      fen = "8/8/8/8/8/8/8/8 w - - 0 1",
+                      statusText = s"Controller unavailable: ${ex.getMessage}",
+                      isGameOver = true,
+                      drawOffered = false,
+                      whiteCaptured = "",
+                      blackCaptured = "",
+                      moveList = Nil,
+                      legalMoves = Map.empty,
+                      currentParser = "fastparse",
+                      availableParsers = List("fastparse")
+                    )
+                  )
+              }
             }
           }
         }
       )
 
-    val bindingFuture = Http().newServerAt("0.0.0.0", 8080).bind(route)
-    println("REST Server online at http://localhost:8080/")
-    println("Module Endpoints ready:")
-    println("  POST /api/model/applyMove")
+    Http().newServerAt("0.0.0.0", port).bind(route)
+    println(s"View service online at http://localhost:$port/")
+    println("Proxy endpoints ready:")
     println("  POST /api/controller/update")
     println("  GET  /api/view/game")
-    println("\nPress RETURN to stop...")
-    
-    // Will block until string read
-    scala.io.StdIn.readLine()
-    
-    bindingFuture
-      .flatMap(_.unbind())
-      .onComplete(_ => system.terminate())
+    Await.result(system.whenTerminated, Duration.Inf)

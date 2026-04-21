@@ -8,17 +8,26 @@ lazy val osName = sys.props("os.name").toLowerCase
 lazy val osArch = sys.props("os.arch").toLowerCase
 lazy val isArm64 = osArch.contains("aarch64") || osArch.contains("arm64")
 lazy val javaFxPlatform =
-  if (osName.contains("mac")) {
-    if (isArm64) "mac-aarch64" else "mac"
-  } else if (osName.contains("win")) {
-    "win"
-  } else if (osName.contains("linux")) {
-    if (isArm64) "linux-aarch64" else "linux"
-  } else {
-    "linux"
+  sys.env.get("JAVAFX_PLATFORM").getOrElse {
+    if (osName.contains("mac")) {
+      if (isArm64) "mac-aarch64" else "mac"
+    } else if (osName.contains("win")) {
+      "win"
+    } else if (osName.contains("linux")) {
+      if (isArm64) "linux-aarch64" else "linux"
+    } else {
+      "linux"
+    }
   }
 
 lazy val javaFxModules = Seq("base", "graphics", "controls", "fxml")
+lazy val includeJavaFx = sys.env.get("INCLUDE_JAVAFX").forall(_.toLowerCase != "false")
+lazy val javaFxDependencies =
+  if (includeJavaFx)
+    javaFxModules.map { m =>
+      ("org.openjfx" % s"javafx-$m" % javaFxVersion).classifier(javaFxPlatform)
+    }
+  else Seq.empty
 
 lazy val root = (project in file("."))
   .settings(
@@ -35,6 +44,6 @@ lazy val root = (project in file("."))
       "com.typesafe.akka" %% "akka-stream-testkit" % "2.8.5" % Test,
       "com.typesafe.akka" %% "akka-http-testkit" % "10.5.3" % Test,
       "com.typesafe.akka" %% "akka-actor-testkit-typed" % "2.8.5" % Test
-    ) ++ javaFxModules.map(m => "org.openjfx" % s"javafx-$m" % javaFxVersion classifier javaFxPlatform),
+    ) ++ javaFxDependencies,
     Test / fork := true
   )
