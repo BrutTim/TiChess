@@ -1,0 +1,39 @@
+services:
+  model-service:
+    build:
+      context: .
+      args:
+        MAIN_CLASS: ch.tichess.services.ModelServer
+    container_name: tichess-model-service
+    environment:
+      MODEL_SERVICE_PORT: 8081
+    ports:
+      - "8081:8081"
+
+  controller-service:
+    build:
+      context: .
+      args:
+        MAIN_CLASS: ch.tichess.services.ControllerServer
+    container_name: tichess-controller-service
+    depends_on:
+      - model-service
+    environment:
+      CONTROLLER_SERVICE_PORT: 8082
+      MODEL_SERVICE_URL: http://model-service:8081
+    ports:
+      - "8082:8082"
+
+  view-service:
+    build:
+      context: .
+      args:
+        MAIN_CLASS: ch.tichess.view.RestServer
+    container_name: tichess-view-service
+    depends_on:
+      - controller-service
+    environment:
+      VIEW_SERVICE_PORT: 8080
+      CONTROLLER_SERVICE_URL: http://controller-service:8082
+    ports:
+      - "8080:8080"

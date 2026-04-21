@@ -324,7 +324,7 @@ object GuiViewAdapter:
       else if !sameRank then s"${move.from.rank + 1}"
       else s"${('a' + move.from.file).toChar}${move.from.rank + 1}"
 
-  private[view] def buildMoveEntries(startGame: Game, moves: Vector[Move]): Vector[String] =
+  def buildMoveEntries(startGame: Game, moves: Vector[Move]): Vector[String] =
     val (_, entries) =
       moves.foldLeft((startGame, Vector.empty[String])) { case ((game, log), move) =>
         val mover = game.sideToMove
