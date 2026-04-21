@@ -36,6 +36,7 @@ final case class Piece(color: Color, kind: PieceType)
 final case class Pos(file: Int, rank: Int):
   def inBounds: Boolean = file >= 0 && file < 8 && rank >= 0 && rank < 8
   def +(d: (Int, Int)): Pos = Pos(file + d._1, rank + d._2)
+  def toAlgebraic: String = s"${(file + 'a').toChar}${rank + 1}"
 
 object Pos:
   def fromAlgebraic(s: String): Either[String, Pos] =
@@ -49,3 +50,23 @@ object Pos:
       if p.inBounds then Right(p) else Left("Position out of bounds.")
 
 final case class Move(from: Pos, to: Pos, promotion: Option[PromotionRole] = None)
+
+final case class CastlingRights(whiteKingside: Boolean, whiteQueenside: Boolean, blackKingside: Boolean, blackQueenside: Boolean):
+  def encoded: String =
+    val wK = if whiteKingside then "K" else ""
+    val wQ = if whiteQueenside then "Q" else ""
+    val bK = if blackKingside then "k" else ""
+    val bQ = if blackQueenside then "q" else ""
+    val s = wK + wQ + bK + bQ
+    if s.isEmpty then "-" else s
+
+  def revokeWhite: CastlingRights = copy(whiteKingside = false, whiteQueenside = false)
+  def revokeBlack: CastlingRights = copy(blackKingside = false, blackQueenside = false)
+
+object CastlingRights:
+  val initial: CastlingRights = CastlingRights(true, true, true, true)
+  val empty: CastlingRights = CastlingRights(false, false, false, false)
+
+  def fromString(s: String): CastlingRights =
+    if s == "-" then empty
+    else CastlingRights(s.contains('K'), s.contains('Q'), s.contains('k'), s.contains('q'))

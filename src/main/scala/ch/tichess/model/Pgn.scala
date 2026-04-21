@@ -64,6 +64,7 @@ private[ch] object PgnSupport:
         finalGame.sideToMove.other match
           case Color.White => "1-0"
           case Color.Black => "0-1"
+      case Right(finalGame) if finalGame.isDraw => "1/2-1/2"
       case _ =>
         "*"
 

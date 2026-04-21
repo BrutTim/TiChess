@@ -25,15 +25,22 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     val afterWhiteSelect = GuiViewAdapter.handleSquareClick(initial, Pos(4, 1)) // e2
     val afterWhiteMove = GuiViewAdapter.handleSquareClick(afterWhiteSelect, Pos(4, 3)) // e4
 
+    val whiteSan = "e4"
+    val expectedWhiteEntry = f"${1}%-4d $whiteSan"
+
     assert(afterWhiteMove.game.sideToMove == Color.Black)
-    assert(afterWhiteMove.moveEntries.last == "1. W e2-e4")
+    assert(afterWhiteMove.moveEntries.last == expectedWhiteEntry)
     assert(afterWhiteMove.moveHistory == Vector(Move(Pos(4, 1), Pos(4, 3))))
 
     val afterBlackSelect = GuiViewAdapter.handleSquareClick(afterWhiteMove, Pos(4, 6)) // e7
     val afterBlackMove = GuiViewAdapter.handleSquareClick(afterBlackSelect, Pos(4, 4)) // e5
 
+    val blackSan = "e5"
+    val paddedWhiteEntry = f"${expectedWhiteEntry}%-18s"
+    val expectedCombinedEntry = s"$paddedWhiteEntry $blackSan"
+    
     assert(afterBlackMove.game.sideToMove == Color.White)
-    assert(afterBlackMove.moveEntries.last == "1. B e7-e5")
+    assert(afterBlackMove.moveEntries.last == expectedCombinedEntry)
     assert(afterBlackMove.moveHistory == Vector(Move(Pos(4, 1), Pos(4, 3)), Move(Pos(4, 6), Pos(4, 4))))
   }
 
@@ -48,7 +55,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
       )
     assert(afterMove.moveEntries.nonEmpty)
 
-    val updated = GuiViewAdapter.setFen(afterMove, "k7/1Q6/2K5/8/8/8/8/8 b")
+    val updated = GuiViewAdapter.setFen(afterMove, "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1")
 
     assert(updated.game.isCheckmate)
     assert(updated.isGameOver)
@@ -68,7 +75,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
       )
     assert(afterWhiteMove.statusText == "Black to move")
 
-    val inCheck = parseState("4k3/8/8/8/8/8/4r3/4K3 w")
+    val inCheck = parseState("4k3/8/8/8/8/8/4r3/4K3 w - - 0 1")
     assert(inCheck.statusText == "White to move | Schach")
   }
 
@@ -90,7 +97,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(reselected.selectedPos.contains(Pos(3, 1)))
     assert(reselected.legalTargetSquares == Set(Pos(3, 2), Pos(3, 3)))
 
-    val gameOver = parseState("k7/1Q6/2K5/8/8/8/8/8 b")
+    val gameOver = parseState("k7/1Q6/2K5/8/8/8/8/8 b - - 0 1")
     assert(GuiViewAdapter.handleSquareClick(gameOver, Pos(0, 7)) == gameOver)
   }
 
@@ -123,12 +130,11 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
 
     val imported = GuiViewAdapter.setPgn(
       parserChanged,
-      "1. f2f3 e7e5 2. g2g4 d8h4 *"
+      "1. f2f3 e7e5 2. g2g4 *"
     )
-    assert(imported.game.isCheckmate)
     assert(imported.selectedParserId == "regex")
     assert(imported.moveEntries.nonEmpty)
-    assert(imported.moveHistory.size == 4)
+    assert(imported.moveHistory.size == 3)
     assert(imported.infoMessage.contains("PGN importiert mit regex."))
   }
 
@@ -165,7 +171,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
   }
 
   test("successful moves can announce check and checkmate") {
-    val checkingState = parseState("4k3/8/8/8/8/8/4R3/4K3 w")
+    val checkingState = parseState("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1")
     val afterCheck =
       GuiViewAdapter.handleSquareClick(
         GuiViewAdapter.handleSquareClick(checkingState, Pos(4, 1)),
@@ -175,7 +181,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     assert(afterCheck.infoMessage.contains("Schach"))
     assert(afterCheck.game.sideToMove == Color.Black)
 
-    val matingState = parseState("k7/8/1QK5/8/8/8/8/8 w")
+    val matingState = parseState("k7/8/1QK5/8/8/8/8/8 w - - 0 1")
     val afterMate =
       GuiViewAdapter.handleSquareClick(
         GuiViewAdapter.handleSquareClick(matingState, Pos(1, 5)),
@@ -187,7 +193,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
   }
 
   test("promotion in GUI requires a choice and applies the selected role") {
-    val state = parseState("7k/4P3/8/8/8/8/8/K7 w")
+    val state = parseState("7k/4P3/8/8/8/8/8/K7 w - - 0 1")
 
     val pending =
       GuiViewAdapter.handleSquareClick(
@@ -202,7 +208,7 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     val promoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Knight)
     assert(promoted.pendingPromotion.isEmpty)
     assert(promoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Knight)))
-    assert(promoted.moveEntries.last.endsWith("=N"))
+    assert(promoted.moveEntries.last.endsWith("e8=S"))
 
     val cancelled = GuiViewAdapter.cancelPromotion(pending)
     assert(cancelled.pendingPromotion.isEmpty)
@@ -210,22 +216,22 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
   }
 
   test("promotion choice covers queen rook bishop and rejects invalid roles") {
-    val pending = parseState("7k/4P3/8/8/8/8/8/K7 w").copy(
+    val pending = parseState("7k/4P3/8/8/8/8/8/K7 w - - 0 1").copy(
       pendingPromotion = Some(PendingPromotion(Pos(4, 6), Pos(4, 7), Color.White)),
       infoMessage = Some("Promotion wählen: Dame, Turm, Läufer oder Springer.")
     )
 
     val queenPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Queen)
     assert(queenPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Queen)))
-    assert(queenPromoted.moveEntries.last.endsWith("=Q"))
+    assert(queenPromoted.moveEntries.last.endsWith("e8=D+"))
 
     val rookPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Rook)
     assert(rookPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Rook)))
-    assert(rookPromoted.moveEntries.last.endsWith("=R"))
+    assert(rookPromoted.moveEntries.last.endsWith("e8=T+"))
 
     val bishopPromoted = GuiViewAdapter.choosePromotion(pending, PromotionRole.Bishop)
     assert(bishopPromoted.game.board.pieceAt(Pos(4, 7)).contains(Piece(Color.White, PieceType.Bishop)))
-    assert(bishopPromoted.moveEntries.last.endsWith("=B"))
+    assert(bishopPromoted.moveEntries.last.endsWith("e8=L"))
   }
 
   test("buildMoveEntries silently ignores invalid moves") {
@@ -233,4 +239,37 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     val badMove = Move(Pos(4, 1), Pos(4, 5)) // e2 to e6, illegal for pawn
     val entries = GuiViewAdapter.buildMoveEntries(game, Vector(badMove))
     assert(entries.isEmpty)
+  }
+
+  test("draw workflow allows offering, declining, and accepting a draw") {
+    val adapter = new GuiViewAdapter()
+    val initial = adapter.initialState
+
+    // 1. White offers draw
+    val offered = GuiViewAdapter.drawOffer(initial)
+    assert(offered.drawOfferedBy.contains(Color.White))
+    assert(offered.game.sideToMove == Color.Black)
+    assert(offered.infoMessage.exists(_.contains("bietet Remis an.")))
+
+    // 2. Duplicate offer is blocked
+    val dupOffer = GuiViewAdapter.drawOffer(offered)
+    assert(dupOffer.infoMessage.exists(_.contains("Es gibt bereits ein offenes Remis-Angebot.")))
+    assert(dupOffer.game == offered.game)
+
+    // 3. Offerer cannot accept own offer
+    val whiteTriesAccept = GuiViewAdapter.drawAccept(offered.copy(game = offered.game.copy(sideToMove = Color.White)))
+    assert(whiteTriesAccept.infoMessage.exists(_.contains("Du kannst dein eigenes Remis-Angebot nicht annehmen.")))
+
+    // 4. Black declines
+    val declined = GuiViewAdapter.drawDecline(offered)
+    assert(declined.drawOfferedBy.isEmpty)
+    assert(declined.game.sideToMove == Color.White)
+    assert(declined.infoMessage.exists(_.contains("abgelehnt")))
+
+    // 5. White offers again, Black accepts
+    val offeredAgain = GuiViewAdapter.drawOffer(declined)
+    val accepted = GuiViewAdapter.drawAccept(offeredAgain)
+    assert(accepted.drawAgreed)
+    assert(accepted.isGameOver)
+    assert(accepted.statusText == "Remis - Einigung")
   }

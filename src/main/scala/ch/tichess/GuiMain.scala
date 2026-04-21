@@ -82,6 +82,40 @@ object GuiMain extends JFXApp3:
       onAction = _ => updateState(GuiViewAdapter.cancelPromotion(state))
     }
 
+    val drawOfferButton = new Button("Remis anbieten") {
+      onAction = _ => updateState(GuiViewAdapter.drawOffer(state))
+    }
+
+    val drawAcceptButton = new Button("Remis annehmen") {
+      visible = false
+      managed = false
+      onAction = _ => updateState(GuiViewAdapter.drawAccept(state))
+    }
+
+    val drawDeclineButton = new Button("Remis ablehnen") {
+      style = "-fx-background-color: #f97316; -fx-text-fill: white;"
+      visible = false
+      managed = false
+      onAction = _ => updateState(GuiViewAdapter.drawDecline(state))
+    }
+
+    val resignButton = new Button("Aufgeben") {
+      style = "-fx-background-color: #ef4444; -fx-text-fill: white;"
+      onAction = _ => updateState(GuiViewAdapter.resign(state))
+    }
+
+    val newGameButton = new Button("Neues Spiel") {
+      style = "-fx-background-color: #3b82f6; -fx-text-fill: white;"
+      onAction = _ => updateState(GuiViewAdapter.newGame())
+    }
+
+    val blackCapturedLabel = new Label {
+      style = "-fx-font-size: 18px;"
+    }
+    val whiteCapturedLabel = new Label {
+      style = "-fx-font-size: 18px;"
+    }
+
     val (boardGrid, squares) = buildBoardGrid(updateState, () => state)
     refreshUi = () =>
       render(
@@ -89,12 +123,19 @@ object GuiMain extends JFXApp3:
         promotionLabel,
         Seq(queenButton, rookButton, bishopButton, knightButton),
         cancelPromotionButton,
+        drawOfferButton,
+        drawAcceptButton,
+        drawDeclineButton,
+        resignButton,
+        newGameButton,
         statusLabel,
         infoLabel,
         moveList,
         parserChoice,
         notationArea,
-        squares
+        squares,
+        whiteCapturedLabel,
+        blackCapturedLabel
       )
 
     val setButton = new Button("Set") {
@@ -154,10 +195,15 @@ object GuiMain extends JFXApp3:
       )
     }
 
+    val boardWithCaptures = new VBox {
+      spacing = 4
+      children = Seq(blackCapturedLabel, boardGrid, whiteCapturedLabel)
+    }
+
     val centerContent = new HBox {
       spacing = 18
       alignment = FxPos.TopLeft
-      children = Seq(boardGrid, movePanel, notationPanel)
+      children = Seq(boardWithCaptures, movePanel, notationPanel)
     }
 
     val statusBar = new VBox {
@@ -174,6 +220,11 @@ object GuiMain extends JFXApp3:
             knightButton,
             cancelPromotionButton
           )
+        },
+        new HBox {
+          spacing = 8
+          alignment = FxPos.CenterLeft
+          children = Seq(drawOfferButton, drawAcceptButton, drawDeclineButton, resignButton, newGameButton)
         },
         statusLabel,
         infoLabel
@@ -270,18 +321,26 @@ object GuiMain extends JFXApp3:
       promotionLabel: Label,
       promotionButtons: Seq[Button],
       cancelPromotionButton: Button,
+      drawOfferButton: Button,
+      drawAcceptButton: Button,
+      drawDeclineButton: Button,
+      resignButton: Button,
+      newGameButton: Button,
       statusLabel: Label,
       infoLabel: Label,
       moveList: ListView[String],
       parserChoice: ChoiceBox[String],
       notationArea: TextArea,
-      squares: Map[Pos, SquareNode]
+      squares: Map[Pos, SquareNode],
+      whiteCapturedLabel: Label,
+      blackCapturedLabel: Label
   ): Unit =
     val board = state.game.board
     val selected = state.selectedPos
     val legalTargets = state.legalTargetSquares
     val gameOver = state.isGameOver
     val promotionPending = state.pendingPromotion.nonEmpty
+    val drawPending = state.drawOfferedBy.nonEmpty && !state.drawAgreed
 
     promotionLabel.visible = promotionPending
     promotionLabel.managed = promotionPending
@@ -291,6 +350,14 @@ object GuiMain extends JFXApp3:
     }
     cancelPromotionButton.visible = promotionPending
     cancelPromotionButton.managed = promotionPending
+
+    drawOfferButton.disable = gameOver || promotionPending || drawPending
+    drawAcceptButton.visible = drawPending
+    drawAcceptButton.managed = drawPending
+    drawDeclineButton.visible = drawPending
+    drawDeclineButton.managed = drawPending
+
+    resignButton.disable = gameOver
 
     squares.foreach { (pos, square) =>
       val pieceOpt = board.pieceAt(pos)
@@ -333,6 +400,23 @@ object GuiMain extends JFXApp3:
     moveList.items = ObservableBuffer.from(state.moveEntries)
     parserChoice.value = state.selectedParserId
     if notationArea.text.value != state.notationText then notationArea.text = state.notationText
+
+    val adv = state.materialAdvantage
+    whiteCapturedLabel.text = capturedDisplay(state.capturedByWhite, adv, adv > 0)
+    blackCapturedLabel.text = capturedDisplay(state.capturedByBlack, adv, adv < 0)
+
+  private def capturedDisplay(pieces: List[PieceType], advantage: Int, showAdv: Boolean): String =
+    val symbols = pieces.map(capturedPieceChar).mkString
+    val advStr = if showAdv then s"  +${Math.abs(advantage)}" else ""
+    if symbols.isEmpty && !showAdv then "" else s"$symbols$advStr"
+
+  private def capturedPieceChar(kind: PieceType): String = kind match
+    case PieceType.Pawn   => "♟"
+    case PieceType.Knight => "♞"
+    case PieceType.Bishop => "♝"
+    case PieceType.Rook   => "♜"
+    case PieceType.Queen  => "♛"
+    case PieceType.King   => "♚"
 
   private def pieceSymbol(piece: Piece): String =
     piece.kind match

@@ -37,10 +37,10 @@ object ConsoleApp:
 
   @annotation.tailrec
   private def loop(io: IO, state: ch.tichess.controller.AppState, message: Option[String]): Unit =
-    io.writeLine(ConsoleView.render(state.game, message))
+    io.writeLine(ConsoleView.render(state.game, message, state.startGame))
     io.readLine() match
       case None => ()
       case Some(in) =>
         val res = Controller.update(state, in)
-        if res.quit then io.writeLine(ConsoleView.render(res.game, res.message))
+        if res.quit then io.writeLine(ConsoleView.render(res.game, res.message, res.state.startGame))
         else loop(io, res.state, res.message)

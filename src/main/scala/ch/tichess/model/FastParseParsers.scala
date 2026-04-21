@@ -7,15 +7,20 @@ import fastparse.NoWhitespace.*
 object FastParseFenParser extends FenParser:
   override val name: String = "FastParse"
 
+  private def field[$: P]: P[String] = P(CharsWhileIn(" \t\r\n").rep(1) ~ CharsWhile(ch => !ch.isWhitespace, min = 1).!)
+
   private def rawFen[$: P]: P[RawFen] =
     P(
       CharsWhileIn(" \t\r\n").rep ~
         CharsWhile(ch => !ch.isWhitespace, min = 1).! ~
-        CharsWhileIn(" \t\r\n").rep(1) ~
-        CharsWhile(ch => !ch.isWhitespace, min = 1).! ~
+        field ~
+        field.? ~
+        field.? ~
+        field.? ~
+        field.? ~
         CharsWhileIn(" \t\r\n").rep ~
         End
-    ).map { case (placement, side) => RawFen(placement, side) }
+    ).map { case (placement, side, c, ep, h, f) => RawFen(placement, side, c, ep, h, f) }
 
   def parse(fen: String): Either[String, Game] =
     fastparse.parse(fen, rawFen(_)) match

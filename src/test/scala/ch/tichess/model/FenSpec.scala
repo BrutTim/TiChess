@@ -6,7 +6,7 @@ import org.scalatest.funsuite.AnyFunSuite
 
 final class FenSpec extends AnyFunSuite:
 
-  private val initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w"
+  private val initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
   private val fullInputError = "FEN must contain exactly placement and side-to-move."
 
   private def parsers: List[FenParser] = FenParsers.all
@@ -24,7 +24,7 @@ final class FenSpec extends AnyFunSuite:
     assertSameAcrossParsers(initialFen, Right(Game.initial))
     assertSameAcrossParsers(s"  \n$initialFen\t  ", Right(Game.initial))
 
-    val blackFen = initialFen.replace(" w", "\n b")
+    val blackFen = initialFen.replace(" w ", "\n b ")
     val parsedBlack = parsers.map(parser => Fen.parseWith(parser, blackFen).toOption.get)
     assert(parsedBlack.forall(_.sideToMove == Color.Black))
     assert(parsedBlack.forall(_.board.allPieces.size == 32))
@@ -32,8 +32,8 @@ final class FenSpec extends AnyFunSuite:
 
   test("all parsers reject missing or extra input instead of leaving rest") {
     assertSameAcrossParsers("8/8/8/8/8/8/8/8", Left(fullInputError))
-    assertSameAcrossParsers("8/8/8/8/8/8/8/4K3 w extra", Left(fullInputError))
-    assertSameAcrossParsers("not a fen", Left(fullInputError))
+    assertSameAcrossParsers("8/8/8/8/8/8/8/4K3 w - - 0 1 extra", Left(fullInputError))
+    assertSameAcrossParsers("not a fen string test with many spaces", Left(fullInputError))
   }
 
   test("all parsers produce the same semantic validation errors") {
@@ -55,7 +55,7 @@ final class FenSpec extends AnyFunSuite:
   }
 
   test("Fen.encode round-trips a position with mixed empty runs and black to move") {
-    val fen = "8/8/8/8/8/3k4/8/KR6 b"
+    val fen = "8/8/8/8/8/3k4/8/KR6 b KQkq - 0 1"
     val games = parsers.map(parser => Fen.parseWith(parser, fen).toOption.get)
 
     assert(games.distinct.size == 1)
@@ -83,7 +83,7 @@ final class FenSpec extends AnyFunSuite:
   test("Fen.parseFile and parseFileWith report IO and parse failures on the Either error track") {
     val missing = Files.createTempDirectory("tichess-missing-dir").resolve("missing.fen")
     val invalid = Files.createTempFile("tichess-invalid-fen-", ".txt")
-    Files.writeString(invalid, "not a fen")
+    Files.writeString(invalid, "not a fen string test with many spaces")
 
     val ioResult = Fen.parseFile(missing.toString)
     assert(ioResult.isLeft)

@@ -26,8 +26,8 @@ final class ControllerSpec extends AnyFunSuite:
     assert(Command.parse("fen").left.exists(_.contains("Expected a FEN")))
     assert(Command.parse("fen   ").left.exists(_.contains("Expected a FEN")))
     assert(Command.parse("pgn").left.exists(_.contains("Expected a PGN")))
-    assert(Command.parse("fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w") == Right(Command.ImportFenCmd("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w")))
-    assert(Command.parse("fen import rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w") == Right(Command.ImportFenCmd("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w")))
+    assert(Command.parse("fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1") == Right(Command.ImportFenCmd("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1")))
+    assert(Command.parse("fen import rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1") == Right(Command.ImportFenCmd("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1")))
     assert(Command.parse("fen import") == Right(Command.ImportFenCmd("import")))
     assert(Command.parse("fen importX") == Right(Command.ImportFenCmd("importX")))
     assert(Command.parse("fen export") == Right(Command.ExportFenCmd))
@@ -56,19 +56,8 @@ final class ControllerSpec extends AnyFunSuite:
 
     val help = Controller.update(g0, "help")
     assert(help.game == g0)
-    assert(help.message.contains(List(
-                                      "- Zug eingeben: `e2 e4`",
-                                      "- Promotion: `e7 e8 q` (`q`, `r`, `b`, `n`)",
-                                      "- Hilfe anzeigen: `help`",
-                                      "- Spiel beenden: `quit`",
-                                      "- Parser anzeigen: `parser`",
-                                      "- Parser setzen: `parser <fastparse|combinators|regex>`",
-                                      "- FEN importieren: `fen import <placement> <w|b>` oder `fen <placement> <w|b>`",
-                                      "- FEN exportieren: `fen export`",
-                                      "- PGN importieren: `pgn import <pgn>`",
-                                      "- PGN exportieren: `pgn export`",
-                                      "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
-                                    ).mkString("\n")))
+    assert(help.message.exists(_.contains("- Remis anbieten: `draw`")))
+    assert(help.message.exists(_.contains("- Remis annehmen: `accept`")))
     assert(!help.quit)
 
     val quit = Controller.update(g0, "quit")
@@ -96,7 +85,7 @@ final class ControllerSpec extends AnyFunSuite:
   }
 
   test("Controller.update sets position from FEN without showing FEN in output") {
-    val fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w"
+    val fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1"
     val res = Controller.update(Controller.initial, s"fen $fen")
     assert(!res.quit)
     assert(res.message.contains("Position set using fastparse."))
@@ -104,7 +93,7 @@ final class ControllerSpec extends AnyFunSuite:
   }
 
   test("Controller.update ends game when set FEN is already checkmate") {
-    val mateFen = "k7/1Q6/2K5/8/8/8/8/8 b"
+    val mateFen = "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1"
     val res = Controller.update(Controller.initial, s"fen $mateFen")
     assert(res.quit)
     assert(res.message.contains("Checkmate. White wins."))
@@ -194,4 +183,73 @@ final class ControllerSpec extends AnyFunSuite:
     assert(!res.quit)
     assert(res.game == game)
     assert(res.message.contains("Promotion required: choose q, r, b, or n."))
+  }
+
+  test("Controller supports draw offer and acceptance") {
+    val s0 = Controller.initialState
+    assert(s0.game.sideToMove == Color.White)
+
+    // White offers draw -> turn flips to Black
+    val offer = Controller.update(s0, "draw")
+    assert(offer.state.drawOfferedBy.contains(Color.White))
+    assert(offer.state.game.sideToMove == Color.Black)
+    assert(offer.message.exists(_.contains("White bietet Remis an.")))
+    assert(offer.message.exists(_.contains("accept")))
+    assert(!offer.quit)
+
+    // Duplicate offer is rejected
+    val dupOffer = Controller.update(offer.state, "draw")
+    assert(dupOffer.state == offer.state)
+    assert(dupOffer.message.contains("Es gibt bereits ein offenes Remis-Angebot."))
+
+    // The offerer (White) cannot accept own offer
+    // Simulate by manually setting sideToMove back to White
+    val offererTriesAccept = Controller.update(
+      offer.state.copy(game = offer.state.game.copy(sideToMove = Color.White)), "accept")
+    assert(!offererTriesAccept.quit)
+    assert(offererTriesAccept.message.contains("Du kannst dein eigenes Remis-Angebot nicht annehmen."))
+
+    // Moves are blocked while draw offer is pending
+    val blockedMove = Controller.update(offer.state, "e7 e5")
+    assert(!blockedMove.quit)
+    assert(blockedMove.message.exists(_.contains("Remis-Angebot ausstehend.")))
+    assert(blockedMove.state == offer.state)
+
+    // Black accepts -> game ends as draw
+    val accept = Controller.update(offer.state, "accept")
+    assert(accept.quit)
+    assert(accept.state.drawAgreed)
+    assert(accept.message.contains("Spiel durch Remis-Uebereinkunft beendet.") ||
+           accept.message.exists(_.contains("beendet.")))
+
+    // --- Decline path ---
+    val offer2 = Controller.update(s0, "draw")
+    assert(offer2.state.game.sideToMove == Color.Black)
+
+    val decline = Controller.update(offer2.state, "decline")
+    assert(!decline.quit)
+    assert(decline.state.drawOfferedBy.isEmpty)
+    // Turn flips back to White (the offerer)
+    assert(decline.state.game.sideToMove == Color.White)
+    assert(decline.message.exists(_.contains("abgelehnt")))
+    assert(decline.message.exists(_.contains("White")))
+
+    // After decline, moves are possible again
+    val moveAfterDecline = Controller.update(decline.state, "e2 e4")
+    assert(!moveAfterDecline.quit)
+    assert(moveAfterDecline.state.game.sideToMove == Color.Black)
+
+    // No pending offer -> decline/accept return error
+    val noPendingDecline = Controller.update(s0, "decline")
+    assert(noPendingDecline.message.contains("Kein Remis-Angebot vorhanden."))
+    val noPendingAccept = Controller.update(s0, "accept")
+    assert(noPendingAccept.message.contains("Kein Remis-Angebot vorhanden."))
+  }
+
+  test("Controller ends game on stalemate during import") {
+    val stalematePgn = """[Result "*"]
+1. e2e3 a7a5 2. d1h5 a8a6 3. h5a5 h7h5 4. h2h4 a6h6 5. a5c7 f7f6 6. c7d7 e8f7 7. d7b7 d8d3 8. b7b8 d3h7 9. b8c8 f7g6 10. c8e6 *"""
+    val res = Controller.update(Controller.initialState, s"pgn import $stalematePgn")
+    assert(res.quit)
+    assert(res.message.contains("Draw (Stalemate)."))
   }
