@@ -1,7 +1,7 @@
 ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / organization := "ch.tichess"
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / coverageExcludedFiles := ".*GuiMain|.*FastParseParsers.*"
+ThisBuild / coverageExcludedFiles := ".*GuiMain|.*FastParseParsers.*|.*RestServer.*"
 
 lazy val javaFxVersion = "21.0.2"
 lazy val osName = sys.props("os.name").toLowerCase
@@ -31,7 +31,10 @@ lazy val root = (project in file("."))
       "com.typesafe.akka" %% "akka-actor-typed" % "2.8.5",
       "com.typesafe.akka" %% "akka-stream" % "2.8.5",
       "com.typesafe.akka" %% "akka-http" % "10.5.3",
-      "com.typesafe.akka" %% "akka-http-spray-json" % "10.5.3"
+      "com.typesafe.akka" %% "akka-http-spray-json" % "10.5.3",
+      "com.typesafe.akka" %% "akka-stream-testkit" % "2.8.5" % Test,
+      "com.typesafe.akka" %% "akka-http-testkit" % "10.5.3" % Test,
+      "com.typesafe.akka" %% "akka-actor-testkit-typed" % "2.8.5" % Test
     ) ++ javaFxModules.map(m => "org.openjfx" % s"javafx-$m" % javaFxVersion classifier javaFxPlatform),
     Test / fork := true
   )

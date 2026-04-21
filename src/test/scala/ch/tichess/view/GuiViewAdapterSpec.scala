@@ -240,3 +240,36 @@ final class GuiViewAdapterSpec extends AnyFunSuite:
     val entries = GuiViewAdapter.buildMoveEntries(game, Vector(badMove))
     assert(entries.isEmpty)
   }
+
+  test("draw workflow allows offering, declining, and accepting a draw") {
+    val adapter = new GuiViewAdapter()
+    val initial = adapter.initialState
+
+    // 1. White offers draw
+    val offered = GuiViewAdapter.drawOffer(initial)
+    assert(offered.drawOfferedBy.contains(Color.White))
+    assert(offered.game.sideToMove == Color.Black)
+    assert(offered.infoMessage.exists(_.contains("bietet Remis an.")))
+
+    // 2. Duplicate offer is blocked
+    val dupOffer = GuiViewAdapter.drawOffer(offered)
+    assert(dupOffer.infoMessage.exists(_.contains("Es gibt bereits ein offenes Remis-Angebot.")))
+    assert(dupOffer.game == offered.game)
+
+    // 3. Offerer cannot accept own offer
+    val whiteTriesAccept = GuiViewAdapter.drawAccept(offered.copy(game = offered.game.copy(sideToMove = Color.White)))
+    assert(whiteTriesAccept.infoMessage.exists(_.contains("Du kannst dein eigenes Remis-Angebot nicht annehmen.")))
+
+    // 4. Black declines
+    val declined = GuiViewAdapter.drawDecline(offered)
+    assert(declined.drawOfferedBy.isEmpty)
+    assert(declined.game.sideToMove == Color.White)
+    assert(declined.infoMessage.exists(_.contains("abgelehnt")))
+
+    // 5. White offers again, Black accepts
+    val offeredAgain = GuiViewAdapter.drawOffer(declined)
+    val accepted = GuiViewAdapter.drawAccept(offeredAgain)
+    assert(accepted.drawAgreed)
+    assert(accepted.isGameOver)
+    assert(accepted.statusText == "Remis - Einigung")
+  }
