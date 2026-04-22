@@ -40,6 +40,8 @@ object StateResponseBuilder:
         .toMap
         .filter(_._2.nonEmpty)
 
+    val lastMove = appState.moveHistory.lastOption
+
     StateResponse(
       fen = ch.tichess.model.Fen.encode(appState.game),
       statusText = guiState.statusText,
@@ -49,6 +51,8 @@ object StateResponseBuilder:
       blackCaptured = capDisplay(guiState.capturedByBlack, advantage < 0),
       moveList = guiState.moveEntries.toList,
       legalMoves = legalMoves,
+      lastMoveFrom = lastMove.map(_.from.toAlgebraic),
+      lastMoveTo = lastMove.map(_.to.toAlgebraic),
       currentParser = appState.parserChoice.id,
       availableParsers = NotationParsers.ids.toList
     )
