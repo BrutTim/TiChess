@@ -18,6 +18,8 @@ final case class StateResponse(
     blackCaptured: String,
     moveList: List[String],
     legalMoves: Map[String, List[String]],
+    lastMoveFrom: Option[String],
+    lastMoveTo: Option[String],
     currentParser: String,
     availableParsers: List[String]
 )
@@ -29,4 +31,4 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
   implicit val commandRequestFormat: RootJsonFormat[CommandRequest] = jsonFormat1(CommandRequest.apply)
   implicit val commandResponseFormat: RootJsonFormat[CommandResponse] = jsonFormat4(CommandResponse.apply)
 
-  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat10(StateResponse.apply)
+  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat12(StateResponse.apply)
