@@ -595,7 +595,8 @@ object RestServer extends JsonSupport:
                 |            if (selectedIdx === idx) { selectedIdx = null; drawBoard(); return; }
                 |            const fromAlg = algebraic(selectedIdx); const toAlg = algebraic(idx);
                 |            const piece = currentBoard[selectedIdx];
-                |            if ((piece === 'P' && idx <= 7) || (piece === 'p' && idx >= 56)) {
+                |            const isLegalDest = legalMovesData[fromAlg] && legalMovesData[fromAlg].includes(toAlg);
+                |            if (isLegalDest && ((piece === 'P' && idx <= 7) || (piece === 'p' && idx >= 56))) {
                 |                pendingPromoMove = { from: fromAlg, to: toAlg };
                 |                document.getElementById('promo-modal').classList.add('active');
                 |            } else { sendMove(fromAlg + " " + toAlg); }
