@@ -63,6 +63,34 @@ object RestServer extends JsonSupport:
                 |            font-size: 1.125rem; font-weight: 500; padding: 0.5rem 1rem;
                 |            background: rgba(0,0,0,0.2); border-radius: 0.5rem;
                 |        }
+                |        .board-panel { width: 32rem; display: flex; flex-direction: column; gap: 0.6rem; }
+                |        .clock-row { display: flex; justify-content: flex-end; }
+                |        .clock {
+                |            min-width: 7.25rem; padding: 0.55rem 0.9rem; border-radius: 0.85rem; text-align: center;
+                |            background: rgba(15, 23, 42, 0.76); border: 1px solid rgba(255,255,255,0.08);
+                |            box-shadow: 0 10px 18px -16px rgba(0, 0, 0, 0.85);
+                |            display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+                |            transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+                |        }
+                |        .clock-label { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
+                |        .clock-time { font-size: 1.55rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+                |        .clock.white-side {
+                |            background: rgba(248, 250, 252, 0.94); border-color: rgba(148, 163, 184, 0.3); color: #0f172a;
+                |        }
+                |        .clock.white-side .clock-label { color: rgba(51, 65, 85, 0.78); }
+                |        .clock.active {
+                |            background: rgba(30, 41, 59, 0.96); border-color: rgba(96, 165, 250, 0.45);
+                |            box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.2), 0 0 20px rgba(59, 130, 246, 0.18);
+                |            transform: translateY(-1px);
+                |        }
+                |        .clock.white-side.active {
+                |            background: rgba(255, 255, 255, 0.98); border-color: rgba(59, 130, 246, 0.35);
+                |            box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.16), 0 0 18px rgba(148, 163, 184, 0.22);
+                |        }
+                |        .clock.expired {
+                |            background: rgba(127, 29, 29, 0.92); border-color: rgba(248, 113, 113, 0.45);
+                |            box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.2), 0 0 20px rgba(239, 68, 68, 0.18);
+                |        }
                 |        .board {
                 |            display: grid; grid-template-columns: repeat(8, 4rem); grid-template-rows: repeat(8, 4rem);
                 |            border: 4px solid var(--dark-sq); border-radius: 0.25rem;
@@ -115,6 +143,7 @@ object RestServer extends JsonSupport:
                 |        .piece-white { color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
                 |        .piece-black { color: #000000; text-shadow: 0 1px 2px rgba(255,255,255,0.6); }
                 |        .board.game-over { pointer-events: none; opacity: 0.75; }
+                |        .board.locked { pointer-events: none; opacity: 0.8; }
                 |        .action-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; justify-content: center; }
                 |        .action-btn {
                 |            padding: 0.45rem 1.1rem; border-radius: 0.5rem; border: 1px solid var(--glass-border);
@@ -188,9 +217,6 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .future-controls { display: grid; gap: 0.75rem; }
                 |        .future-controls .action-btn { width: 100%; }
-                |        .action-btn:disabled.future-disabled {
-                |            opacity: 0.5; cursor: not-allowed; border-style: dashed;
-                |        }
                 |        .start-btn {
                 |            width: 100%; padding: 0.95rem 1.2rem; font-size: 1.15rem; font-weight: 700;
                 |            background: linear-gradient(180deg, rgba(132, 204, 22, 0.95), rgba(101, 163, 13, 0.95));
@@ -212,9 +238,23 @@ object RestServer extends JsonSupport:
                 |<div class="container">
                 |    <h1>TiChess Web GUI</h1>
                 |    <div id="status" class="status">Connecting...</div>
-                |    <div id="black-captured" class="captured-pieces"></div>
-                |    <div id="board" class="board"></div>
-                |    <div id="white-captured" class="captured-pieces"></div>
+                |    <div class="board-panel">
+                |        <div class="clock-row">
+                |            <div id="clock-black" class="clock">
+                |                <span class="clock-label">Schwarz</span>
+                |                <span id="clock-black-time" class="clock-time">05:00</span>
+                |            </div>
+                |        </div>
+                |        <div id="black-captured" class="captured-pieces"></div>
+                |        <div id="board" class="board"></div>
+                |        <div id="white-captured" class="captured-pieces"></div>
+                |        <div class="clock-row">
+                |            <div id="clock-white" class="clock white-side">
+                |                <span class="clock-label">Weiß</span>
+                |                <span id="clock-white-time" class="clock-time">05:00</span>
+                |            </div>
+                |        </div>
+                |    </div>
                 |</div>
                 |<div class="sidebar">
                 |    <div class="tab-bar" role="tablist" aria-label="Schach Seitenbereich">
@@ -233,15 +273,14 @@ object RestServer extends JsonSupport:
                 |            <div class="future-controls">
                 |                <div class="field-group">
                 |                    <label for="time-mode">Zeitmodus</label>
-                |                    <select id="time-mode" disabled>
-                |                        <option>Ohne Zeit</option>
-                |                        <option>1 Minute</option>
-                |                        <option>3 Minuten</option>
-                |                        <option>5 Minuten</option>
-                |                        <option>10 Minuten</option>
+                |                    <select id="time-mode">
+                |                        <option value="60000">1 Minute</option>
+                |                        <option value="180000">3 Minuten</option>
+                |                        <option value="300000" selected>5 Minuten</option>
+                |                        <option value="600000">10 Minuten</option>
                 |                    </select>
                 |                </div>
-                |                <button class="action-btn start-btn future-disabled" type="button" disabled>Partie starten</button>
+                |                <button id="btn-start-game" class="action-btn start-btn" type="button" onclick="startTimedGame()">Partie starten</button>
                 |            </div>
                 |        </div>
                 |        <div class="panel-card">
@@ -304,9 +343,145 @@ object RestServer extends JsonSupport:
                 |    let selectedIdx = null; let currentBoard = new Array(64).fill(null); let pendingPromoMove = null;
                 |    let isGameOver = false; let legalMovesData = {}; let lastMoveSquares = [];
                 |    let activeTab = 'game';
+                |    let serverStatusText = 'Connecting...';
+                |    let currentSideToMove = 'w';
+                |    let gameStarted = false;
+                |    let gameTimedOut = false;
+                |    let timeoutLoser = null;
+                |    let clockBaseMs = 300000;
+                |    let whiteRemainingMs = clockBaseMs;
+                |    let blackRemainingMs = clockBaseMs;
+                |    let activeClock = null;
+                |    let timerHandle = null;
+                |    let lastTickAt = 0;
                 |    function algebraic(idx) {
                 |        const file = idx % 8; const rank = 7 - Math.floor(idx / 8);
                 |        return String.fromCharCode('a'.charCodeAt(0) + file) + (rank + 1);
+                |    }
+                |    function selectedModeMs() {
+                |        return parseInt(document.getElementById('time-mode').value, 10);
+                |    }
+                |    function pad(value) {
+                |        return String(value).padStart(2, '0');
+                |    }
+                |    function formatClock(ms) {
+                |        const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+                |        const minutes = Math.floor(totalSeconds / 60);
+                |        const seconds = totalSeconds % 60;
+                |        return `${pad(minutes)}:${pad(seconds)}`;
+                |    }
+                |    function updateClockDisplay() {
+                |        document.getElementById('clock-white-time').innerText = formatClock(whiteRemainingMs);
+                |        document.getElementById('clock-black-time').innerText = formatClock(blackRemainingMs);
+                |        const whiteClock = document.getElementById('clock-white');
+                |        const blackClock = document.getElementById('clock-black');
+                |        whiteClock.classList.toggle('active', gameStarted && !gameTimedOut && activeClock === 'w' && !isGameOver);
+                |        blackClock.classList.toggle('active', gameStarted && !gameTimedOut && activeClock === 'b' && !isGameOver);
+                |        whiteClock.classList.toggle('expired', gameTimedOut && timeoutLoser === 'w');
+                |        blackClock.classList.toggle('expired', gameTimedOut && timeoutLoser === 'b');
+                |    }
+                |    function stopClockTicker() {
+                |        if (timerHandle !== null) {
+                |            clearInterval(timerHandle);
+                |            timerHandle = null;
+                |        }
+                |    }
+                |    function syncActiveClockFromState() {
+                |        if (!gameStarted || isGameOver || gameTimedOut) {
+                |            activeClock = null;
+                |        } else {
+                |            activeClock = currentSideToMove;
+                |        }
+                |        lastTickAt = Date.now();
+                |        updateClockDisplay();
+                |    }
+                |    function tickClocks() {
+                |        if (!gameStarted || isGameOver || gameTimedOut || !activeClock) return;
+                |        const now = Date.now();
+                |        const elapsed = now - lastTickAt;
+                |        lastTickAt = now;
+                |        if (activeClock === 'w') whiteRemainingMs = Math.max(0, whiteRemainingMs - elapsed);
+                |        if (activeClock === 'b') blackRemainingMs = Math.max(0, blackRemainingMs - elapsed);
+                |        if (whiteRemainingMs === 0 || blackRemainingMs === 0) {
+                |            gameTimedOut = true;
+                |            timeoutLoser = whiteRemainingMs === 0 ? 'w' : 'b';
+                |            activeClock = null;
+                |            stopClockTicker();
+                |        }
+                |        updateClockDisplay();
+                |        updateStatusText();
+                |        updateInteractionState();
+                |    }
+                |    function startClockTicker() {
+                |        stopClockTicker();
+                |        lastTickAt = Date.now();
+                |        timerHandle = setInterval(tickClocks, 200);
+                |    }
+                |    function resetClocksToSelection() {
+                |        clockBaseMs = selectedModeMs();
+                |        whiteRemainingMs = clockBaseMs;
+                |        blackRemainingMs = clockBaseMs;
+                |        gameStarted = false;
+                |        gameTimedOut = false;
+                |        timeoutLoser = null;
+                |        activeClock = null;
+                |        stopClockTicker();
+                |        updateClockDisplay();
+                |        updateStatusText();
+                |        updateInteractionState();
+                |    }
+                |    function startTimedGame() {
+                |        if (isGameOver || gameTimedOut) return;
+                |        if (!gameStarted) {
+                |            clockBaseMs = selectedModeMs();
+                |            whiteRemainingMs = clockBaseMs;
+                |            blackRemainingMs = clockBaseMs;
+                |            gameTimedOut = false;
+                |            timeoutLoser = null;
+                |        }
+                |        gameStarted = true;
+                |        activeClock = 'w';
+                |        lastTickAt = Date.now();
+                |        updateClockDisplay();
+                |        updateStatusText();
+                |        updateInteractionState();
+                |        startClockTicker();
+                |    }
+                |    function timedOutMessage() {
+                |        if (timeoutLoser === 'w') return 'Weiß verliert auf Zeit. Schwarz gewinnt.';
+                |        if (timeoutLoser === 'b') return 'Schwarz verliert auf Zeit. Weiß gewinnt.';
+                |        return 'Zeit abgelaufen.';
+                |    }
+                |    function updateStatusText() {
+                |        const statusEl = document.getElementById('status');
+                |        if (gameTimedOut) {
+                |            statusEl.innerText = timedOutMessage();
+                |            return;
+                |        }
+                |        if (!gameStarted && !isGameOver) {
+                |            statusEl.innerText = `Bereit zum Starten • ${serverStatusText}`;
+                |            return;
+                |        }
+                |        statusEl.innerText = serverStatusText;
+                |    }
+                |    function updateInteractionState() {
+                |        const boardEl = document.getElementById('board');
+                |        const locallyBlocked = !gameStarted || gameTimedOut;
+                |        boardEl.classList.toggle('game-over', isGameOver || gameTimedOut);
+                |        boardEl.classList.toggle('locked', locallyBlocked && !isGameOver && !gameTimedOut);
+                |        const startBtn = document.getElementById('btn-start-game');
+                |        const drawBtn = document.getElementById('btn-draw');
+                |        const resignBtn = document.getElementById('btn-resign');
+                |        const newBtn = document.getElementById('btn-new');
+                |        const acceptBtn = document.getElementById('btn-accept');
+                |        const declineBtn = document.getElementById('btn-decline');
+                |        startBtn.disabled = gameStarted || isGameOver || gameTimedOut;
+                |        document.getElementById('time-mode').disabled = gameStarted;
+                |        drawBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
+                |        resignBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
+                |        newBtn.disabled = false;
+                |        acceptBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
+                |        declineBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
                 |    }
                 |    function switchTab(tabName) {
                 |        activeTab = tabName;
@@ -321,18 +496,24 @@ object RestServer extends JsonSupport:
                 |    async function fetchGame() {
                 |        try {
                 |            const response = await fetch('/api/view/game'); const data = await response.json();
-                |            document.getElementById('status').innerText = data.statusText;
+                |            serverStatusText = data.statusText;
                 |            isGameOver = data.isGameOver;
-                |            const boardEl = document.getElementById('board');
-                |            if (isGameOver) boardEl.classList.add('game-over'); else boardEl.classList.remove('game-over');
+                |            currentSideToMove = (data.fen.split(' ')[1] || 'w').trim();
+                |            if (isGameOver) {
+                |                gameStarted = false;
+                |                activeClock = null;
+                |                stopClockTicker();
+                |            } else if (gameStarted && !gameTimedOut) {
+                |                syncActiveClockFromState();
+                |            }
                 |            const btnDraw = document.getElementById('btn-draw');
                 |            const btnAccept = document.getElementById('btn-accept');
                 |            const btnResign = document.getElementById('btn-resign');
-                |            btnDraw.disabled = isGameOver || data.drawOffered;
+                |            btnDraw.disabled = !gameStarted || isGameOver || gameTimedOut || data.drawOffered;
                 |            const showDrawResponse = data.drawOffered && !isGameOver;
                 |            btnAccept.style.display = showDrawResponse ? 'inline-block' : 'none';
                 |            document.getElementById('btn-decline').style.display = showDrawResponse ? 'inline-block' : 'none';
-                |            btnResign.disabled = isGameOver;
+                |            btnResign.disabled = !gameStarted || isGameOver || gameTimedOut;
                 |            document.getElementById('btn-new').disabled = false;
                 |            document.getElementById('white-captured').innerText = data.whiteCaptured || '';
                 |            document.getElementById('black-captured').innerText = data.blackCaptured || '';
@@ -360,8 +541,14 @@ object RestServer extends JsonSupport:
                 |            }
                 |            parserSelect.value = data.currentParser;
                 |            renderFen(data.fen);
+                |            updateClockDisplay();
+                |            updateStatusText();
+                |            updateInteractionState();
                 |            switchTab(activeTab);
-                |        } catch (e) { document.getElementById('status').innerText = "Connection lost."; }
+                |        } catch (e) {
+                |            serverStatusText = 'Connection lost.';
+                |            updateStatusText();
+                |        }
                 |    }
                 |    function renderFen(fen) {
                 |        const placement = fen.split(' ')[0]; let idx = 0; currentBoard = new Array(64).fill(null);
@@ -401,7 +588,7 @@ object RestServer extends JsonSupport:
                 |        return marker;
                 |    }
                 |    function handleSquareClick(idx) {
-                |        if (isGameOver) return;
+                |        if (isGameOver || !gameStarted || gameTimedOut) return;
                 |        if (selectedIdx === null) {
                 |            if (currentBoard[idx]) { selectedIdx = idx; drawBoard(); }
                 |        } else {
@@ -420,10 +607,11 @@ object RestServer extends JsonSupport:
                 |        if (pendingPromoMove) { sendMove(pendingPromoMove.from + " " + pendingPromoMove.to + " " + role); pendingPromoMove = null; }
                 |    }
                 |    async function sendMove(algebraicMove) {
+                |        if (!gameStarted || isGameOver || gameTimedOut) return;
                 |        try {
                 |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: algebraicMove }) });
                 |            const data = await res.json();
-                |            if (!data.success && data.message) document.getElementById('status').innerText = "Illegal: " + data.message;
+                |            if (!data.success && data.message) serverStatusText = "Illegal: " + data.message;
                 |            fetchGame();
                 |        } catch (e) { console.error(e); }
                 |    }
@@ -434,14 +622,21 @@ object RestServer extends JsonSupport:
                 |            if (data.message) {
                 |               if (cmd.includes('export')) {
                 |                   document.getElementById('notation-text').value = data.message;
-                |                   document.getElementById('status').innerText = "Exported.";
+                |                   serverStatusText = "Exported.";
                 |               } else {
-                |                   document.getElementById('status').innerText = data.message;
+                |                   serverStatusText = data.message;
                 |               }
+                |            }
+                |            if (cmd === 'new' || cmd.startsWith('fen import') || cmd.startsWith('pgn import')) {
+                |               resetClocksToSelection();
                 |            }
                 |            fetchGame();
                 |        } catch (e) { console.error(e); }
                 |    }
+                |    document.getElementById('time-mode').addEventListener('change', () => {
+                |        if (!gameStarted) resetClocksToSelection();
+                |    });
+                |    resetClocksToSelection();
                 |    fetchGame();
                 |</script>
                 |</body>
