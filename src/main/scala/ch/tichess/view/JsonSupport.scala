@@ -1,6 +1,7 @@
 package ch.tichess.view
 
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
+import ch.tichess.controller.persistence.ChallengeRecord
 import spray.json.{DefaultJsonProtocol, RootJsonFormat}
 
 final case class MoveRequest(fen: String, algebraicMove: String) // e.g. "e2 e4" or "e7 e8 q"
@@ -21,7 +22,9 @@ final case class StateResponse(
     lastMoveFrom: Option[String],
     lastMoveTo: Option[String],
     currentParser: String,
-    availableParsers: List[String]
+    availableParsers: List[String],
+    challengeHintFrom: Option[String],
+    challengeSideToMove: Option[String]
 )
 
 trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
@@ -30,5 +33,7 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
 
   implicit val commandRequestFormat: RootJsonFormat[CommandRequest] = jsonFormat1(CommandRequest.apply)
   implicit val commandResponseFormat: RootJsonFormat[CommandResponse] = jsonFormat4(CommandResponse.apply)
+  implicit val challengeRecordFormat: RootJsonFormat[ChallengeRecord] = jsonFormat4(ChallengeRecord.apply)
+  implicit val challengeRecordListFormat: RootJsonFormat[List[ChallengeRecord]] = listFormat[ChallengeRecord]
 
-  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat12(StateResponse.apply)
+  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat14(StateResponse.apply)

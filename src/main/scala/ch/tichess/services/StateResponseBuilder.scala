@@ -42,10 +42,17 @@ object StateResponseBuilder:
 
     val lastMove = appState.moveHistory.lastOption
 
+    val statusText =
+      if appState.challengeCompleted then "Challenge geloest."
+      else
+        appState.challengeMode match
+          case Some(_) => "Challenge aktiv."
+          case None    => guiState.statusText
+
     StateResponse(
       fen = ch.tichess.model.Fen.encode(appState.game),
-      statusText = guiState.statusText,
-      isGameOver = guiState.isGameOver,
+      statusText = statusText,
+      isGameOver = guiState.isGameOver || appState.challengeCompleted,
       drawOffered = appState.drawOfferedBy.nonEmpty,
       whiteCaptured = capDisplay(guiState.capturedByWhite, advantage > 0),
       blackCaptured = capDisplay(guiState.capturedByBlack, advantage < 0),
@@ -54,5 +61,11 @@ object StateResponseBuilder:
       lastMoveFrom = lastMove.map(_.from.toAlgebraic),
       lastMoveTo = lastMove.map(_.to.toAlgebraic),
       currentParser = appState.parserChoice.id,
-      availableParsers = NotationParsers.ids.toList
+      availableParsers = NotationParsers.ids.toList,
+      challengeHintFrom = appState.challengeMode.flatMap(_.remainingMoves.headOption.map(_.from.toAlgebraic)),
+      challengeSideToMove = appState.challengeMode.map(_ =>
+        appState.game.sideToMove match
+          case ch.tichess.model.Color.White => "Weiss"
+          case ch.tichess.model.Color.Black => "Schwarz"
+      )
     )
