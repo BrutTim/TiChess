@@ -6,6 +6,9 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 import _root_.slick.jdbc.H2Profile.api._
 
+import java.nio.file.Files
+import scala.concurrent.Future
+
 class SlickGameDaoSpec extends AsyncWordSpec with Matchers {
 
   "SlickGameDao" should {
@@ -63,6 +66,56 @@ class SlickGameDaoSpec extends AsyncWordSpec with Matchers {
     "provide a broader built-in Lichess fallback set" in {
       ChallengeSeeds.defaultLichessPuzzles.size should be >= 8
       ChallengeSeeds.defaultLichessPuzzles.map(_.id).distinct shouldBe ChallengeSeeds.defaultLichessPuzzles.map(_.id)
+    }
+  }
+
+  "ChallengeDao" should {
+    "not seed when records already exist" in {
+      final class ExistingChallengeDao extends ChallengeDao {
+        var saved = Vector.empty[ChallengeRecord]
+        override def save(challenge: ChallengeRecord): Future[Unit] =
+          saved = saved :+ challenge
+          Future.successful(())
+        override def load(id: String): Future[Option[ChallengeRecord]] = Future.successful(None)
+        override def update(challenge: ChallengeRecord): Future[Unit] = Future.successful(())
+        override def delete(id: String): Future[Unit] = Future.successful(())
+        override def listAll(): Future[Seq[ChallengeRecord]] =
+          Future.successful(Seq(ChallengeRecord("existing", "Existing", "8/8/8/8/8/8/8/8 w - - 0 1", "a1 a2")))
+      }
+
+      val dao = new ExistingChallengeDao
+      dao.seedIfEmpty().map { _ =>
+        dao.saved shouldBe empty
+      }
+    }
+  }
+
+  "LichessPuzzleImporter" should {
+    "read CSV files and keep supported promotion solution moves" in {
+      val csv = Files.createTempFile("lichess-puzzles", ".csv")
+      val header = "PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags"
+      val promotionRow =
+        "promo,4k3/P7/8/8/8/8/8/4K3 w - - 0 1,a7a8q e8f7 a8a1q a8a1r a8a1b a8a1n,1200,80,90,1,promotion,https://lichess.org/test,"
+      Files.writeString(csv, s"$header\n$promotionRow\n")
+
+      val imported = LichessPuzzleImporter.fromCsvFile(csv.toString)
+
+      imported.map(_.id) shouldBe Seq("promo")
+      imported.head.moves shouldBe "e8 f7, a8 a1 q, a8 a1 r, a8 a1 b, a8 a1 n"
+    }
+
+    "skip malformed rows, invalid first moves, and empty solutions" in {
+      val rows = Seq(
+        "too-short,only-two-columns",
+        "bad-first,4k3/P7/8/8/8/8/8/4K3 w - - 0 1,a7a",
+        "empty-solution,4k3/P7/8/8/8/8/8/4K3 w - - 0 1,a7a8q",
+        "bad-promotion,4k3/P7/8/8/8/8/8/4K3 w - - 0 1,a7a8q e8f7 a8a1x"
+      )
+
+      val imported = LichessPuzzleImporter.fromCsvRows(rows)
+
+      imported.map(_.id) shouldBe Seq("bad-promotion")
+      imported.head.moves shouldBe "e8 f7"
     }
   }
 }

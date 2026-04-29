@@ -185,6 +185,10 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .tab-icon { font-size: 1.2rem; line-height: 1; }
                 |        .tab-label { font-size: 0.98rem; font-weight: 700; }
+                |        .sr-only {
+                |            position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+                |            overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+                |        }
                 |        .tab-panel { display: none; flex-direction: column; gap: 1rem; }
                 |        .tab-panel.active { display: flex; }
                 |        .panel-card {
@@ -265,16 +269,16 @@ object RestServer extends JsonSupport:
                 |<div class="sidebar">
                 |    <div class="tab-bar" role="tablist" aria-label="Schach Seitenbereich">
                 |        <button id="tab-btn-game" class="tab-btn active" type="button" role="tab" aria-selected="true" aria-controls="tab-game" onclick="switchTab('game')">
-                |            <span class="tab-icon">🎮</span>
-                |            <span class="tab-label">Spiel</span>
+                |            <span class="tab-icon" aria-hidden="true">&#x265E;&#xFE0E;</span>
+                |            <span class="tab-label sr-only">Spiel</span>
                 |        </button>
                 |        <button id="tab-btn-io" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-io" onclick="switchTab('io')">
-                |            <span class="tab-icon">📄</span>
-                |            <span class="tab-label">Import / Export</span>
+                |            <span class="tab-icon" aria-hidden="true">📄</span>
+                |            <span class="tab-label sr-only">Import / Export</span>
                 |        </button>
                 |        <button id="tab-btn-challenges" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-challenges" onclick="switchTab('challenges')">
-                |            <span class="tab-icon">♟</span>
-                |            <span class="tab-label">Challenges</span>
+                |            <span class="tab-icon" aria-hidden="true">🧩</span>
+                |            <span class="tab-label sr-only">Challenges</span>
                 |        </button>
                 |    </div>
                 |    <section id="tab-game" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-game">
@@ -331,7 +335,7 @@ object RestServer extends JsonSupport:
                 |    </section>
                 |    <section id="tab-challenges" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-challenges">
                 |        <div class="panel-card">
-                |            <h3 class="mini-title"><span class="mini-icon">♟</span><span>Training</span></h3>
+                |            <h3 class="mini-title"><span>Training</span></h3>
                 |            <div class="future-controls">
                 |                <div id="challenge-side" class="challenge-meta">Bereit.</div>
                 |                <button id="btn-random-challenge" class="action-btn start-btn" type="button" onclick="startRandomChallenge()">Random Challenge</button>
@@ -455,15 +459,16 @@ object RestServer extends JsonSupport:
                 |        updateStatusText();
                 |        updateInteractionState();
                 |    }
-                |    function startTimedGame() {
-                |        if (isGameOver || gameTimedOut) return;
-                |        if (!gameStarted) {
-                |            clockBaseMs = selectedModeMs();
-                |            whiteRemainingMs = clockBaseMs;
-                |            blackRemainingMs = clockBaseMs;
-                |            gameTimedOut = false;
-                |            timeoutLoser = null;
-                |        }
+                |    async function startTimedGame() {
+                |        if (challengeActive) return;
+                |        await sendCommand('new', { skipFetch: true });
+                |        clockBaseMs = selectedModeMs();
+                |        whiteRemainingMs = clockBaseMs;
+                |        blackRemainingMs = clockBaseMs;
+                |        gameTimedOut = false;
+                |        timeoutLoser = null;
+                |        selectedIdx = null;
+                |        challengeHintVisible = false;
                 |        gameStarted = true;
                 |        activeClock = 'w';
                 |        lastTickAt = Date.now();
@@ -471,6 +476,7 @@ object RestServer extends JsonSupport:
                 |        updateStatusText();
                 |        updateInteractionState();
                 |        startClockTicker();
+                |        fetchGame();
                 |    }
                 |    function timedOutMessage() {
                 |        if (timeoutLoser === 'w') return 'Weiß verliert auf Zeit. Schwarz gewinnt.';
@@ -626,13 +632,19 @@ object RestServer extends JsonSupport:
                 |    function handleSquareClick(idx) {
                 |        if (isGameOver || (!gameStarted && !challengeActive) || gameTimedOut) return;
                 |        challengeHintVisible = false;
+                |        const clickedPiece = currentBoard[idx];
                 |        if (selectedIdx === null) {
-                |            if (currentBoard[idx]) { selectedIdx = idx; drawBoard(); }
+                |            if (clickedPiece) { selectedIdx = idx; drawBoard(); }
                 |        } else {
                 |            if (selectedIdx === idx) { selectedIdx = null; drawBoard(); return; }
                 |            const fromAlg = algebraic(selectedIdx); const toAlg = algebraic(idx);
                 |            const piece = currentBoard[selectedIdx];
                 |            const isLegalDest = legalMovesData[fromAlg] && legalMovesData[fromAlg].includes(toAlg);
+                |            if (!isLegalDest && clickedPiece && legalMovesData[toAlg]) {
+                |                selectedIdx = idx;
+                |                drawBoard();
+                |                return;
+                |            }
                 |            if (isLegalDest && ((piece === 'P' && idx <= 7) || (piece === 'p' && idx >= 56))) {
                 |                pendingPromoMove = { from: fromAlg, to: toAlg };
                 |                document.getElementById('promo-modal').classList.add('active');
@@ -655,7 +667,7 @@ object RestServer extends JsonSupport:
                 |            fetchGame();
                 |        } catch (e) { console.error(e); }
                 |    }
-                |    async function sendCommand(cmd) {
+                |    async function sendCommand(cmd, options = {}) {
                 |        try {
                 |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: cmd }) });
                 |            const data = await res.json();
@@ -681,7 +693,7 @@ object RestServer extends JsonSupport:
                 |               challengeActive = false;
                 |               resetClocksToSelection();
                 |            }
-                |            fetchGame();
+                |            if (!options.skipFetch) fetchGame();
                 |        } catch (e) { console.error(e); }
                 |    }
                 |    function updateChallengePanel() {

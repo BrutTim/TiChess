@@ -123,15 +123,6 @@ object Controller:
       moves <- parseChallengeMoves(record.moves)
     yield (game, ChallengeState(record.id, record.name, moves))
 
-  private def moveLabel(move: Move): String =
-    val promo = move.promotion.map {
-      case PromotionRole.Queen  => " q"
-      case PromotionRole.Rook   => " r"
-      case PromotionRole.Bishop => " b"
-      case PromotionRole.Knight => " n"
-    }.getOrElse("")
-    s"${move.from.toAlgebraic} ${move.to.toAlgebraic}$promo"
-
   private def applyChallengeMove(
       state: AppState,
       mv: Move,

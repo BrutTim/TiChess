@@ -1,7 +1,7 @@
 ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / organization := "ch.tichess"
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / coverageExcludedFiles := ".*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*services/.*|.*MongoGameDao.*"
+ThisBuild / coverageExcludedFiles := ".*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*services/.*|.*MongoGameDao.*|.*MongoChallengeDao.*"
 
 lazy val javaFxVersion = "21.0.2"
 lazy val osName = sys.props("os.name").toLowerCase
