@@ -64,7 +64,7 @@ class SlickGameDaoSpec extends AsyncWordSpec with Matchers {
 
   "ChallengeSeeds" should {
     "provide a broader built-in Lichess fallback set" in {
-      ChallengeSeeds.defaultLichessPuzzles.size should be >= 8
+      ChallengeSeeds.defaultLichessPuzzles.size should be >= 2000
       ChallengeSeeds.defaultLichessPuzzles.map(_.id).distinct shouldBe ChallengeSeeds.defaultLichessPuzzles.map(_.id)
     }
   }

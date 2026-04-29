@@ -18,6 +18,15 @@ final class ControllerSpec extends AnyFunSuite:
     assert(Command.parse("  ") == Left("Empty input."))
   }
 
+  test("Command.parse handles bot commands") {
+    assert(Command.parse("bot on") == Right(Command.BotOn))
+    assert(Command.parse("bot off") == Right(Command.BotOff))
+    assert(Command.parse("bot black") == Right(Command.BotColor(Color.Black)))
+    assert(Command.parse("bot white") == Right(Command.BotColor(Color.White)))
+    assert(Command.parse("bot move") == Right(Command.BotMove))
+    assert(Command.parse("bot") == Left("Expected a bot command like: bot move, bot black, bot off."))
+  }
+
   test("Command.parse parses move and rejects bad format") {
     assert(Command.parse("e2 e4").isRight)
     assert(Command.parse("e7 e8 q") == Right(Command.MoveCmd(Move(Pos(4, 6), Pos(4, 7), Some(PromotionRole.Queen)))))
@@ -69,6 +78,25 @@ final class ControllerSpec extends AnyFunSuite:
     assert(quit.game == g0)
     assert(quit.message.contains("Bye."))
     assert(quit.quit)
+  }
+
+  test("Controller.update supports bot configuration and bot move") {
+    val s0 = Controller.initialState
+
+    val enabled = Controller.update(s0, "bot black")
+    assert(enabled.state.activeBot.contains(Color.Black))
+
+    val wrongTurn = Controller.update(enabled.state, "bot move")
+    assert(wrongTurn.state == enabled.state)
+    assert(wrongTurn.message.exists(_.contains("Bot ist nicht am Zug")))
+
+    val afterHuman = Controller.update(enabled.state, "e2 e4")
+    assert(afterHuman.state.game.sideToMove == Color.Black)
+
+    val botRes = Controller.update(afterHuman.state, "bot move")
+    assert(botRes.state.moveHistory.size == 2)
+    assert(botRes.state.game.sideToMove == Color.White)
+    assert(botRes.state.activeBot.contains(Color.Black))
   }
 
   test("Controller.update ends game with black winner on checkmate") {

@@ -37,7 +37,7 @@ class JsonSupportSpec extends AnyFunSuite with JsonSupport {
     val res = StateResponse(
       "fen", "status", false, false, "Q", "q", List("e4"),
       Map("e2" -> List("e3", "e4")), Some("e2"), Some("e4"), "fastparse", List("fastparse", "regex"),
-      Some("g1"), Some("Weiss")
+      Some("g1"), Some("Weiss"), Some("b")
     )
     val json = res.toJson
     assert(json.convertTo[StateResponse] == res)

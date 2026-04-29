@@ -19,6 +19,9 @@ trait ChallengeDao {
 }
 
 object ChallengeSeeds {
+  private val DefaultSeedLimit = 3000
+  private val SeedResource = "/lichess_puzzles_seed.csv"
+
   val legacyDemoIds: Set[String] = Set("back-rank-rook", "scholars-mate", "rook-lift")
 
   private val fallbackLichessRows: Seq[String] = Seq(
@@ -36,6 +39,9 @@ object ChallengeSeeds {
     "001Wz,4r1k1/5ppp/p1Q2n2/1p1p4/3P4/P5P1/1q3PBP/2R3K1 b - - 0 30,b2c1 g2f1 c1c6,1477,75,94,701,advantage endgame short,https://lichess.org/84RH3LaP/black#60,"
   )
 
-  val defaultLichessPuzzles: Seq[ChallengeRecord] =
-    LichessPuzzleImporter.fromCsvRows(fallbackLichessRows).take(12)
+  lazy val defaultLichessPuzzles: Seq[ChallengeRecord] =
+    Option(getClass.getResourceAsStream(SeedResource))
+      .map(stream => LichessPuzzleImporter.fromCsvInputStream(stream, DefaultSeedLimit))
+      .filter(_.nonEmpty)
+      .getOrElse(LichessPuzzleImporter.fromCsvRows(fallbackLichessRows, DefaultSeedLimit))
 }

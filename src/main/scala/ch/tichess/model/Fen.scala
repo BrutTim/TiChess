@@ -55,6 +55,12 @@ private[ch] object FenSupport:
     yield Game(board, side, castling, ep, half, full)
 
   def encode(game: Game): String =
+    val base = encodeBase(game)
+    s"$base ${game.halfMoveClock} ${game.fullMoveNumber}"
+
+  def encodeNormalized(game: Game): String = encodeBase(game)
+
+  private def encodeBase(game: Game): String =
     val placement = encodePlacement(game.board)
     val side = game.sideToMove match
       case Color.White => "w"
@@ -63,7 +69,7 @@ private[ch] object FenSupport:
     val ep = game.enPassantTarget.map { p =>
       (p.file + 'a').toChar.toString + (p.rank + 1).toString
     }.getOrElse("-")
-    s"$placement $side $castling $ep ${game.halfMoveClock} ${game.fullMoveNumber}"
+    s"$placement $side $castling $ep"
 
   def parseFile(path: String, parser: FenParser): Either[String, Game] =
     for
@@ -223,3 +229,5 @@ object Fen:
     FenSupport.parseFile(path, parser)
 
   def encode(game: Game): String = FenSupport.encode(game)
+
+  def encodeNormalized(game: Game): String = FenSupport.encodeNormalized(game)

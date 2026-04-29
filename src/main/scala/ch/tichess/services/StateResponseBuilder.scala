@@ -67,5 +67,9 @@ object StateResponseBuilder:
         appState.game.sideToMove match
           case ch.tichess.model.Color.White => "Weiss"
           case ch.tichess.model.Color.Black => "Schwarz"
-      )
+      ),
+      activeBot = appState.activeBot.map {
+        case ch.tichess.model.Color.White => "w"
+        case ch.tichess.model.Color.Black => "b"
+      }
     )

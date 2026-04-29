@@ -1,0 +1,29 @@
+[Event "Italian Game"]
+[Result "1-0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. c3 Nf6 5. d3 d6 1-0
+
+[Event "Ruy Lopez"]
+[Result "1-0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 1-0
+
+[Event "Sicilian Defense, Najdorf"]
+[Result "1-0"]
+
+1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 a6 1-0
+
+[Event "Queen's Gambit Declined"]
+[Result "1-0"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 1-0
+
+[Event "French Defense"]
+[Result "0-1"]
+
+1. e4 e6 2. d4 d5 3. Nc3 Nf6 4. Bg5 Bb4 0-1
+
+[Event "Caro-Kann Defense"]
+[Result "1/2-1/2"]
+
+1. e4 c6 2. d4 d5 3. Nc3 dxe4 4. Nxe4 Bf5 1/2-1/2
