@@ -1,7 +1,12 @@
 package ch.tichess.controller
 
+import ch.tichess.controller.persistence.ChallengeRecord
 import ch.tichess.model.*
 import org.scalatest.funsuite.AnyFunSuite
+
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.*
 
 final class ControllerSpec extends AnyFunSuite:
 
@@ -138,6 +143,62 @@ final class ControllerSpec extends AnyFunSuite:
     assert(!importedNonMate.quit)
     assert(importedNonMate.message.contains("PGN imported using regex."))
     assert(importedNonMate.state.moveHistory.size == 2)
+  }
+
+  test("Controller loads challenges, rejects wrong moves, and auto-plays replies") {
+    val record = ChallengeRecord(
+      id = "line",
+      name = "Test Line",
+      fen = "4k3/8/8/8/8/8/4p3/4K2R w - - 0 1",
+      moves = "h1 h8, e8 f7, h8 h7"
+    )
+    val lookup: String => Future[Option[ChallengeRecord]] =
+      id => Future.successful(if id == record.id then Some(record) else None)
+
+    val loaded = Await.result(
+      Controller.updateAsync(Controller.initialState, "challenge load line", new ch.tichess.services.LocalModelService(), lookup),
+      2.seconds
+    )
+    assert(loaded.message.contains("Challenge gestartet."))
+    assert(loaded.state.challengeMode.exists(_.remainingMoves.size == 3))
+    assert(loaded.state.moveHistory.isEmpty)
+
+    val wrong = Await.result(
+      Controller.updateAsync(loaded.state, "e1 e2", new ch.tichess.services.LocalModelService(), lookup),
+      2.seconds
+    )
+    assert(wrong.state == loaded.state)
+    assert(wrong.message.exists(_.contains("Falscher Zug")))
+    assert(!wrong.message.exists(_.contains("h1 h8")))
+
+    val first = Await.result(
+      Controller.updateAsync(loaded.state, "h1 h8", new ch.tichess.services.LocalModelService(), lookup),
+      2.seconds
+    )
+    assert(first.message.contains("Richtig."))
+    assert(first.state.moveHistory == Vector(Move(Pos(7, 0), Pos(7, 7)), Move(Pos(4, 7), Pos(5, 6))))
+    assert(first.state.challengeMode.exists(_.remainingMoves == Vector(Move(Pos(7, 7), Pos(7, 6)))))
+
+    val solved = Await.result(
+      Controller.updateAsync(first.state, "h8 h7", new ch.tichess.services.LocalModelService(), lookup),
+      2.seconds
+    )
+    assert(solved.state.challengeMode.isEmpty)
+    assert(solved.state.challengeCompleted)
+    assert(solved.message.contains("Challenge geloest!"))
+
+    val random = Await.result(
+      Controller.updateAsync(
+        Controller.initialState,
+        "challenge random",
+        new ch.tichess.services.LocalModelService(),
+        lookup,
+        () => Future.successful(Some(record))
+      ),
+      2.seconds
+    )
+    assert(random.message.contains("Challenge gestartet."))
+    assert(random.state.challengeMode.nonEmpty)
   }
 
   test("Controller.update reports parser selection and PGN import errors without changing state") {

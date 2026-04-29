@@ -115,6 +115,7 @@ object RestServer extends JsonSupport:
                 |        .last-move { box-shadow: inset 0 0 0 4px rgba(134, 239, 172, 0.45); }
                 |        .sq-light.last-move { background-color: #c8ebc7; }
                 |        .sq-dark.last-move { background-color: #7baa72; }
+                |        .hint-square { box-shadow: inset 0 0 0 5px rgba(250, 204, 21, 0.88), inset 0 0 24px rgba(250, 204, 21, 0.35); }
                 |        .coord-label {
                 |            position: absolute; font-size: 0.78rem; font-weight: 700; line-height: 1;
                 |            opacity: 0.92; user-select: none; pointer-events: none;
@@ -168,7 +169,7 @@ object RestServer extends JsonSupport:
                 |            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
                 |        }
                 |        .tab-bar {
-                |            display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem;
+                |            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem;
                 |            background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(255,255,255,0.06);
                 |            border-radius: 0.9rem; padding: 0.35rem;
                 |        }
@@ -184,6 +185,10 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .tab-icon { font-size: 1.2rem; line-height: 1; }
                 |        .tab-label { font-size: 0.98rem; font-weight: 700; }
+                |        .sr-only {
+                |            position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+                |            overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+                |        }
                 |        .tab-panel { display: none; flex-direction: column; gap: 1rem; }
                 |        .tab-panel.active { display: flex; }
                 |        .panel-card {
@@ -217,6 +222,11 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .future-controls { display: grid; gap: 0.75rem; }
                 |        .future-controls .action-btn { width: 100%; }
+                |        .challenge-meta {
+                |            padding: 0.65rem 0.75rem; border-radius: 0.65rem; min-height: 1.2rem;
+                |            background: rgba(0,0,0,0.16); border: 1px solid rgba(255,255,255,0.06);
+                |            color: #e2e8f0; font-size: 0.95rem; font-weight: 700;
+                |        }
                 |        .start-btn {
                 |            width: 100%; padding: 0.95rem 1.2rem; font-size: 1.15rem; font-weight: 700;
                 |            background: linear-gradient(180deg, rgba(132, 204, 22, 0.95), rgba(101, 163, 13, 0.95));
@@ -259,12 +269,16 @@ object RestServer extends JsonSupport:
                 |<div class="sidebar">
                 |    <div class="tab-bar" role="tablist" aria-label="Schach Seitenbereich">
                 |        <button id="tab-btn-game" class="tab-btn active" type="button" role="tab" aria-selected="true" aria-controls="tab-game" onclick="switchTab('game')">
-                |            <span class="tab-icon">🎮</span>
-                |            <span class="tab-label">Spiel</span>
+                |            <span class="tab-icon" aria-hidden="true">&#x265E;&#xFE0E;</span>
+                |            <span class="tab-label sr-only">Spiel</span>
                 |        </button>
                 |        <button id="tab-btn-io" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-io" onclick="switchTab('io')">
-                |            <span class="tab-icon">📄</span>
-                |            <span class="tab-label">Import / Export</span>
+                |            <span class="tab-icon" aria-hidden="true">📄</span>
+                |            <span class="tab-label sr-only">Import / Export</span>
+                |        </button>
+                |        <button id="tab-btn-challenges" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-challenges" onclick="switchTab('challenges')">
+                |            <span class="tab-icon" aria-hidden="true">🧩</span>
+                |            <span class="tab-label sr-only">Challenges</span>
                 |        </button>
                 |    </div>
                 |    <section id="tab-game" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-game">
@@ -319,6 +333,16 @@ object RestServer extends JsonSupport:
                 |            </div>
                 |        </div>
                 |    </section>
+                |    <section id="tab-challenges" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-challenges">
+                |        <div class="panel-card">
+                |            <h3 class="mini-title"><span>Training</span></h3>
+                |            <div class="future-controls">
+                |                <div id="challenge-side" class="challenge-meta">Bereit.</div>
+                |                <button id="btn-random-challenge" class="action-btn start-btn" type="button" onclick="startRandomChallenge()">Random Challenge</button>
+                |                <button id="btn-challenge-hint" class="action-btn" type="button" onclick="showChallengeHint()" disabled>Hinweis</button>
+                |            </div>
+                |        </div>
+                |    </section>
                 |</div>
                 |</div>
                 |
@@ -343,6 +367,11 @@ object RestServer extends JsonSupport:
                 |    let selectedIdx = null; let currentBoard = new Array(64).fill(null); let pendingPromoMove = null;
                 |    let isGameOver = false; let legalMovesData = {}; let lastMoveSquares = [];
                 |    let activeTab = 'game';
+                |    let challengeActive = false;
+                |    let challengeHintFrom = null;
+                |    let challengeHintVisible = false;
+                |    let challengeSideToMove = null;
+                |    let transientStatusText = null;
                 |    let serverStatusText = 'Connecting...';
                 |    let currentSideToMove = 'w';
                 |    let gameStarted = false;
@@ -430,15 +459,16 @@ object RestServer extends JsonSupport:
                 |        updateStatusText();
                 |        updateInteractionState();
                 |    }
-                |    function startTimedGame() {
-                |        if (isGameOver || gameTimedOut) return;
-                |        if (!gameStarted) {
-                |            clockBaseMs = selectedModeMs();
-                |            whiteRemainingMs = clockBaseMs;
-                |            blackRemainingMs = clockBaseMs;
-                |            gameTimedOut = false;
-                |            timeoutLoser = null;
-                |        }
+                |    async function startTimedGame() {
+                |        if (challengeActive) return;
+                |        await sendCommand('new', { skipFetch: true });
+                |        clockBaseMs = selectedModeMs();
+                |        whiteRemainingMs = clockBaseMs;
+                |        blackRemainingMs = clockBaseMs;
+                |        gameTimedOut = false;
+                |        timeoutLoser = null;
+                |        selectedIdx = null;
+                |        challengeHintVisible = false;
                 |        gameStarted = true;
                 |        activeClock = 'w';
                 |        lastTickAt = Date.now();
@@ -446,6 +476,7 @@ object RestServer extends JsonSupport:
                 |        updateStatusText();
                 |        updateInteractionState();
                 |        startClockTicker();
+                |        fetchGame();
                 |    }
                 |    function timedOutMessage() {
                 |        if (timeoutLoser === 'w') return 'Weiß verliert auf Zeit. Schwarz gewinnt.';
@@ -458,6 +489,10 @@ object RestServer extends JsonSupport:
                 |            statusEl.innerText = timedOutMessage();
                 |            return;
                 |        }
+                |        if (challengeActive) {
+                |            statusEl.innerText = serverStatusText;
+                |            return;
+                |        }
                 |        if (!gameStarted && !isGameOver) {
                 |            statusEl.innerText = `Bereit zum Starten • ${serverStatusText}`;
                 |            return;
@@ -466,7 +501,7 @@ object RestServer extends JsonSupport:
                 |    }
                 |    function updateInteractionState() {
                 |        const boardEl = document.getElementById('board');
-                |        const locallyBlocked = !gameStarted || gameTimedOut;
+                |        const locallyBlocked = (!gameStarted && !challengeActive) || gameTimedOut;
                 |        boardEl.classList.toggle('game-over', isGameOver || gameTimedOut);
                 |        boardEl.classList.toggle('locked', locallyBlocked && !isGameOver && !gameTimedOut);
                 |        const startBtn = document.getElementById('btn-start-game');
@@ -475,29 +510,34 @@ object RestServer extends JsonSupport:
                 |        const newBtn = document.getElementById('btn-new');
                 |        const acceptBtn = document.getElementById('btn-accept');
                 |        const declineBtn = document.getElementById('btn-decline');
-                |        startBtn.disabled = gameStarted || isGameOver || gameTimedOut;
-                |        document.getElementById('time-mode').disabled = gameStarted;
-                |        drawBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
-                |        resignBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
+                |        const hintBtn = document.getElementById('btn-challenge-hint');
+                |        startBtn.disabled = gameStarted || challengeActive || isGameOver || gameTimedOut;
+                |        document.getElementById('time-mode').disabled = gameStarted || challengeActive;
+                |        drawBtn.disabled = !gameStarted || challengeActive || isGameOver || gameTimedOut;
+                |        resignBtn.disabled = !gameStarted || challengeActive || isGameOver || gameTimedOut;
                 |        newBtn.disabled = false;
-                |        acceptBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
-                |        declineBtn.disabled = !gameStarted || isGameOver || gameTimedOut;
+                |        acceptBtn.disabled = !gameStarted || challengeActive || isGameOver || gameTimedOut;
+                |        declineBtn.disabled = !gameStarted || challengeActive || isGameOver || gameTimedOut;
+                |        hintBtn.disabled = !challengeActive || isGameOver || !challengeHintFrom;
                 |    }
                 |    function switchTab(tabName) {
                 |        activeTab = tabName;
-                |        const isGame = tabName === 'game';
-                |        document.getElementById('tab-btn-game').classList.toggle('active', isGame);
-                |        document.getElementById('tab-btn-io').classList.toggle('active', !isGame);
-                |        document.getElementById('tab-btn-game').setAttribute('aria-selected', String(isGame));
-                |        document.getElementById('tab-btn-io').setAttribute('aria-selected', String(!isGame));
-                |        document.getElementById('tab-game').classList.toggle('active', isGame);
-                |        document.getElementById('tab-io').classList.toggle('active', !isGame);
+                |        ['game', 'io', 'challenges'].forEach(tab => {
+                |            const active = tabName === tab;
+                |            document.getElementById('tab-btn-' + tab).classList.toggle('active', active);
+                |            document.getElementById('tab-btn-' + tab).setAttribute('aria-selected', String(active));
+                |            document.getElementById('tab-' + tab).classList.toggle('active', active);
+                |        });
                 |    }
                 |    async function fetchGame() {
                 |        try {
                 |            const response = await fetch('/api/view/game'); const data = await response.json();
-                |            serverStatusText = data.statusText;
                 |            isGameOver = data.isGameOver;
+                |            challengeActive = (data.statusText || '').startsWith('Challenge aktiv');
+                |            challengeHintFrom = data.challengeHintFrom || null;
+                |            challengeSideToMove = data.challengeSideToMove || null;
+                |            serverStatusText = transientStatusText || data.statusText;
+                |            transientStatusText = null;
                 |            currentSideToMove = (data.fen.split(' ')[1] || 'w').trim();
                 |            if (isGameOver) {
                 |                gameStarted = false;
@@ -509,11 +549,11 @@ object RestServer extends JsonSupport:
                 |            const btnDraw = document.getElementById('btn-draw');
                 |            const btnAccept = document.getElementById('btn-accept');
                 |            const btnResign = document.getElementById('btn-resign');
-                |            btnDraw.disabled = !gameStarted || isGameOver || gameTimedOut || data.drawOffered;
+                |            btnDraw.disabled = !gameStarted || challengeActive || isGameOver || gameTimedOut || data.drawOffered;
                 |            const showDrawResponse = data.drawOffered && !isGameOver;
                 |            btnAccept.style.display = showDrawResponse ? 'inline-block' : 'none';
                 |            document.getElementById('btn-decline').style.display = showDrawResponse ? 'inline-block' : 'none';
-                |            btnResign.disabled = !gameStarted || isGameOver || gameTimedOut;
+                |            btnResign.disabled = !gameStarted || challengeActive || isGameOver || gameTimedOut;
                 |            document.getElementById('btn-new').disabled = false;
                 |            document.getElementById('white-captured').innerText = data.whiteCaptured || '';
                 |            document.getElementById('black-captured').innerText = data.blackCaptured || '';
@@ -541,6 +581,7 @@ object RestServer extends JsonSupport:
                 |            }
                 |            parserSelect.value = data.currentParser;
                 |            renderFen(data.fen);
+                |            updateChallengePanel();
                 |            updateClockDisplay();
                 |            updateStatusText();
                 |            updateInteractionState();
@@ -567,6 +608,7 @@ object RestServer extends JsonSupport:
                 |            sq.className = 'square ' + (isLight ? 'sq-light' : 'sq-dark');
                 |            if (selectedIdx === i) sq.classList.add('selected');
                 |            if (lastMoveSquares.includes(algebraic(i))) sq.classList.add('last-move');
+                |            if (challengeHintVisible && challengeHintFrom === algebraic(i)) sq.classList.add('hint-square');
                 |            if (selectedIdx !== null) {
                 |                const alg = algebraic(selectedIdx);
                 |                if (legalMovesData[alg] && legalMovesData[alg].includes(algebraic(i))) {
@@ -588,14 +630,22 @@ object RestServer extends JsonSupport:
                 |        return marker;
                 |    }
                 |    function handleSquareClick(idx) {
-                |        if (isGameOver || !gameStarted || gameTimedOut) return;
+                |        if (isGameOver || (!gameStarted && !challengeActive) || gameTimedOut) return;
+                |        challengeHintVisible = false;
+                |        const clickedPiece = currentBoard[idx];
                 |        if (selectedIdx === null) {
-                |            if (currentBoard[idx]) { selectedIdx = idx; drawBoard(); }
+                |            if (clickedPiece) { selectedIdx = idx; drawBoard(); }
                 |        } else {
                 |            if (selectedIdx === idx) { selectedIdx = null; drawBoard(); return; }
                 |            const fromAlg = algebraic(selectedIdx); const toAlg = algebraic(idx);
                 |            const piece = currentBoard[selectedIdx];
-                |            if ((piece === 'P' && idx <= 7) || (piece === 'p' && idx >= 56)) {
+                |            const isLegalDest = legalMovesData[fromAlg] && legalMovesData[fromAlg].includes(toAlg);
+                |            if (!isLegalDest && clickedPiece && legalMovesData[toAlg]) {
+                |                selectedIdx = idx;
+                |                drawBoard();
+                |                return;
+                |            }
+                |            if (isLegalDest && ((piece === 'P' && idx <= 7) || (piece === 'p' && idx >= 56))) {
                 |                pendingPromoMove = { from: fromAlg, to: toAlg };
                 |                document.getElementById('promo-modal').classList.add('active');
                 |            } else { sendMove(fromAlg + " " + toAlg); }
@@ -607,15 +657,17 @@ object RestServer extends JsonSupport:
                 |        if (pendingPromoMove) { sendMove(pendingPromoMove.from + " " + pendingPromoMove.to + " " + role); pendingPromoMove = null; }
                 |    }
                 |    async function sendMove(algebraicMove) {
-                |        if (!gameStarted || isGameOver || gameTimedOut) return;
+                |        if ((!gameStarted && !challengeActive) || isGameOver || gameTimedOut) return;
                 |        try {
                 |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: algebraicMove }) });
                 |            const data = await res.json();
                 |            if (!data.success && data.message) serverStatusText = "Illegal: " + data.message;
+                |            if (data.success && data.message) transientStatusText = data.message;
+                |            challengeHintVisible = false;
                 |            fetchGame();
                 |        } catch (e) { console.error(e); }
                 |    }
-                |    async function sendCommand(cmd) {
+                |    async function sendCommand(cmd, options = {}) {
                 |        try {
                 |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: cmd }) });
                 |            const data = await res.json();
@@ -624,14 +676,43 @@ object RestServer extends JsonSupport:
                 |                   document.getElementById('notation-text').value = data.message;
                 |                   serverStatusText = "Exported.";
                 |               } else {
+                |                   transientStatusText = data.message;
                 |                   serverStatusText = data.message;
                 |               }
                 |            }
+                |            if (cmd.startsWith('challenge ')) {
+                |               challengeActive = true;
+                |               challengeHintVisible = false;
+                |               isGameOver = false;
+                |               gameStarted = false;
+                |               gameTimedOut = false;
+                |               activeClock = null;
+                |               stopClockTicker();
+                |            }
                 |            if (cmd === 'new' || cmd.startsWith('fen import') || cmd.startsWith('pgn import')) {
+                |               challengeActive = false;
                 |               resetClocksToSelection();
                 |            }
-                |            fetchGame();
+                |            if (!options.skipFetch) fetchGame();
                 |        } catch (e) { console.error(e); }
+                |    }
+                |    function updateChallengePanel() {
+                |        const sideEl = document.getElementById('challenge-side');
+                |        if (challengeActive && challengeSideToMove) {
+                |            sideEl.innerText = challengeSideToMove + ' zieht.';
+                |        } else if (serverStatusText === 'Challenge geloest.' || serverStatusText === 'Challenge geloest!') {
+                |            sideEl.innerText = 'Geloest.';
+                |        } else {
+                |            sideEl.innerText = 'Bereit.';
+                |        }
+                |    }
+                |    function showChallengeHint() {
+                |        if (!challengeActive || isGameOver || !challengeHintFrom) return;
+                |        challengeHintVisible = true;
+                |        drawBoard();
+                |    }
+                |    function startRandomChallenge() {
+                |        sendCommand('challenge random');
                 |    }
                 |    document.getElementById('time-mode').addEventListener('change', () => {
                 |        if (!gameStarted) resetClocksToSelection();
@@ -662,28 +743,32 @@ object RestServer extends JsonSupport:
         },
         pathPrefix("api" / "view") {
           get {
-            path("game") {
-              onComplete(controllerClient.fetchState()) {
-                case Success(state) => complete(state)
-                case Failure(ex) =>
-                  complete(
-                    StateResponse(
-                      fen = "8/8/8/8/8/8/8/8 w - - 0 1",
-                      statusText = s"Controller unavailable: ${ex.getMessage}",
-                      isGameOver = true,
-                      drawOffered = false,
-                      whiteCaptured = "",
-                      blackCaptured = "",
-                      moveList = Nil,
-                      legalMoves = Map.empty,
+            concat(
+              path("game") {
+                onComplete(controllerClient.fetchState()) {
+                  case Success(state) => complete(state)
+                  case Failure(ex) =>
+                    complete(
+                      StateResponse(
+                        fen = "8/8/8/8/8/8/8/8 w - - 0 1",
+                        statusText = s"Controller unavailable: ${ex.getMessage}",
+                        isGameOver = true,
+                        drawOffered = false,
+                        whiteCaptured = "",
+                        blackCaptured = "",
+                        moveList = Nil,
+                        legalMoves = Map.empty,
                       lastMoveFrom = None,
                       lastMoveTo = None,
                       currentParser = "fastparse",
-                      availableParsers = List("fastparse")
+                      availableParsers = List("fastparse"),
+                      challengeHintFrom = None,
+                      challengeSideToMove = None
                     )
-                  )
+                    )
+                }
               }
-            }
+            )
           }
         }
       )

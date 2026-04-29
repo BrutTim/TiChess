@@ -1,9 +1,15 @@
 package ch.tichess.controller
 
 import ch.tichess.model.*
+import ch.tichess.controller.persistence.ChallengeRecord
+import ch.tichess.services.ModelService
+
+import scala.concurrent.{ExecutionContext, Future}
 
 enum Command:
   case MoveCmd(move: Move)
+  case LoadChallengeCmd(id: String)
+  case RandomChallengeCmd
   case ImportFenCmd(fen: String)
   case ExportFenCmd
   case ImportPgnCmd(pgn: String)
@@ -35,6 +41,9 @@ object Command:
       else if lower == "parser" then Right(Command.ShowParserCmd)
       else if lower.startsWith("parser") && lower.length > 6 && lower.charAt(6).isWhitespace then
         Right(Command.SetParserCmd(trimmed.substring(6).trim))
+      else if lower.startsWith("challenge load") && lower.length > 14 && lower.charAt(14).isWhitespace then
+        Right(Command.LoadChallengeCmd(trimmed.substring(14).trim))
+      else if lower == "challenge random" then Right(Command.RandomChallengeCmd)
       else
         lower match
           case "fen" => Left("Expected a FEN after 'fen'.")
@@ -46,6 +55,7 @@ object Command:
           case "decline" | "ablehnen" => Right(Command.DrawDecline)
           case "resign" | "aufgeben" => Right(Command.Resign)
           case "new" | "restart" | "neu" => Right(Command.NewGame)
+          case "challenge" => Left("Expected a challenge command like: challenge random.")
           case _ =>
             val parts = trimmed.split("\\s+").toList
             parts match
@@ -60,7 +70,9 @@ object Command:
                   to <- Pos.fromAlgebraic(toStr.toLowerCase)
                   promotion <- PromotionRole.fromPromotionChar(promoStr)
                 yield Command.MoveCmd(Move(from, to, Some(promotion)))
-              case _ => Left("Expected a move like: e2 e4 (or 'help', 'quit', fen, pgn, parser).")
+              case _ => Left("Expected a move like: e2 e4 (or 'help', 'quit', fen, pgn, parser, challenge).")
+
+final case class ChallengeState(id: String, name: String, remainingMoves: Vector[Move])
 
 final case class AppState(
     game: Game,
@@ -69,7 +81,9 @@ final case class AppState(
     moveHistory: Vector[Move] = Vector.empty,
     drawOfferedBy: Option[Color] = None,
     resignedBy: Option[Color] = None,
-    drawAgreed: Boolean = false
+    drawAgreed: Boolean = false,
+    challengeMode: Option[ChallengeState] = None,
+    challengeCompleted: Boolean = false
 )
 
 final case class UpdateResult(state: AppState, message: Option[String], quit: Boolean):
@@ -86,13 +100,113 @@ object Controller:
   private def parserSummary(choice: ParserChoice): String =
     s"Current parser: ${choice.id}. Available parsers: ${NotationParsers.ids.mkString(", ")}."
 
+  private def parseMoveText(text: String): Either[String, Move] =
+    Command.parse(text).flatMap {
+      case Command.MoveCmd(move) => Right(move)
+      case _                     => Left(s"Expected a move in challenge solution, got: $text")
+    }
+
+  private def parseChallengeMoves(moves: String): Either[String, Vector[Move]] =
+    val parts = moves.split(",").map(_.trim).filter(_.nonEmpty).toVector
+    if parts.isEmpty then Left("Challenge has no solution moves.")
+    else
+      parts.foldLeft(Right(Vector.empty): Either[String, Vector[Move]]) { (acc, part) =>
+        for
+          parsed <- acc
+          move <- parseMoveText(part)
+        yield parsed :+ move
+      }
+
+  private def challengeState(record: ChallengeRecord): Either[String, (Game, ChallengeState)] =
+    for
+      game <- Fen.parse(record.fen)
+      moves <- parseChallengeMoves(record.moves)
+    yield (game, ChallengeState(record.id, record.name, moves))
+
+  private def applyChallengeMove(
+      state: AppState,
+      mv: Move,
+      modelService: ModelService
+  )(implicit ec: ExecutionContext): Future[UpdateResult] =
+    state.challengeMode match
+      case None =>
+        applyRegularMove(state, mv, modelService)
+      case Some(challenge) =>
+        challenge.remainingMoves.headOption match
+          case None =>
+            Future.successful(UpdateResult(state.copy(challengeMode = None, challengeCompleted = true), Some("Challenge geloest!"), quit = false))
+          case Some(expected) if expected != mv =>
+            Future.successful(
+              UpdateResult(
+                state,
+                Some("Falscher Zug, versuche es nochmal!"),
+                quit = false
+              )
+            )
+          case Some(_) =>
+            modelService.applyMove(state.game, mv).flatMap {
+              case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
+              case Right(afterPlayerMove) =>
+                val afterPlayerState = state.copy(
+                  game = afterPlayerMove,
+                  moveHistory = state.moveHistory :+ mv,
+                  drawOfferedBy = None
+                )
+                val remainingAfterPlayer = challenge.remainingMoves.tail
+                remainingAfterPlayer.headOption match
+                  case None =>
+                    val solvedState = afterPlayerState.copy(challengeMode = None, challengeCompleted = true)
+                    Future.successful(UpdateResult(solvedState, Some("Challenge geloest!"), quit = false))
+                  case Some(reply) =>
+                    modelService.applyMove(afterPlayerMove, reply).map {
+                      case Left(err) =>
+                        UpdateResult(
+                          afterPlayerState.copy(challengeMode = Some(challenge.copy(remainingMoves = remainingAfterPlayer))),
+                          Some(s"Richtiger Zug, aber der Antwortzug konnte nicht ausgefuehrt werden: $err"),
+                          quit = false
+                        )
+                      case Right(afterReply) =>
+                        val stillRemaining = remainingAfterPlayer.tail
+                        val nextChallenge = challenge.copy(remainingMoves = stillRemaining)
+                        val nextState = afterPlayerState.copy(
+                          game = afterReply,
+                          moveHistory = afterPlayerState.moveHistory :+ reply,
+                          challengeMode = Some(nextChallenge)
+                        )
+                        if stillRemaining.isEmpty then
+                          UpdateResult(nextState.copy(challengeMode = None, challengeCompleted = true), Some("Challenge geloest!"), quit = false)
+                        else
+                          UpdateResult(nextState, Some("Richtig."), quit = false)
+                    }
+            }
+
+  private def applyRegularMove(
+      state: AppState,
+      mv: Move,
+      modelService: ModelService
+  )(implicit ec: ExecutionContext): Future[UpdateResult] =
+    modelService.applyMove(state.game, mv).map {
+      case Left(err)     => UpdateResult(state, Some(err), quit = false)
+      case Right(nextGm) =>
+        val nextState = state.copy(game = nextGm, moveHistory = state.moveHistory :+ mv, drawOfferedBy = None)
+        if nextGm.isCheckmate then
+          val winner = colorLabel(nextGm.sideToMove.other)
+          UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
+        else if nextGm.isDraw then
+          UpdateResult(nextState, Some(s"Draw (Stalemate)."), quit = true)
+        else UpdateResult(nextState, None, quit = false)
+    }
+
   def update(game: Game, input: String): UpdateResult =
     update(AppState(game), input)
 
-  import scala.concurrent.{Future, ExecutionContext}
-  import ch.tichess.services.ModelService
-
-  def updateAsync(state: AppState, input: String, modelService: ModelService)(implicit ec: ExecutionContext): Future[UpdateResult] =
+  def updateAsync(
+      state: AppState,
+      input: String,
+      modelService: ModelService,
+      challengeLookup: String => Future[Option[ChallengeRecord]] = _ => Future.successful(None),
+      randomChallenge: () => Future[Option[ChallengeRecord]] = () => Future.successful(None)
+  )(implicit ec: ExecutionContext): Future[UpdateResult] =
     Command.parse(input) match
       case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
       case Right(Command.Help) =>
@@ -112,6 +226,7 @@ object Controller:
                                       "- Remis ablehnen: `decline`",
                                       "- Aufgeben: `resign`",
                                       "- Neues Spiel: `new`",
+                                      "- Zufalls-Challenge starten: `challenge random`",
                                       "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
                                     ).mkString("\n")), quit = false))
       case Right(Command.DrawOffer) =>
@@ -155,22 +270,54 @@ object Controller:
       case Right(Command.MoveCmd(_)) if state.drawOfferedBy.isDefined =>
         Future.successful(UpdateResult(state, Some("Remis-Angebot ausstehend. Bitte 'accept' oder 'decline' eingeben."), quit = false))
       case Right(Command.MoveCmd(mv)) =>
-        modelService.applyMove(state.game, mv).map {
-          case Left(err)     => UpdateResult(state, Some(err), quit = false)
-          case Right(nextGm) =>
-            val nextState = state.copy(game = nextGm, moveHistory = state.moveHistory :+ mv, drawOfferedBy = None)
-            if nextGm.isCheckmate then
-              val winner = colorLabel(nextGm.sideToMove.other)
-              UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true)
-            else if nextGm.isDraw then
-              UpdateResult(nextState, Some(s"Draw (Stalemate)."), quit = true)
-            else UpdateResult(nextState, None, quit = false)
+        applyChallengeMove(state, mv, modelService)
+      case Right(Command.LoadChallengeCmd(id)) =>
+        challengeLookup(id).map {
+          case None =>
+            UpdateResult(state, Some(s"Challenge nicht gefunden: $id"), quit = false)
+          case Some(record) =>
+            challengeState(record) match
+              case Left(err) =>
+                UpdateResult(state, Some(s"Challenge konnte nicht geladen werden: $err"), quit = false)
+              case Right((game, challenge)) =>
+                val nextState = state.copy(
+                  game = game,
+                  startGame = game,
+                  moveHistory = Vector.empty,
+                  drawOfferedBy = None,
+                  resignedBy = None,
+                  drawAgreed = false,
+                  challengeMode = Some(challenge),
+                  challengeCompleted = false
+                )
+                UpdateResult(nextState, Some("Challenge gestartet."), quit = false)
+        }
+      case Right(Command.RandomChallengeCmd) =>
+        randomChallenge().map {
+          case None =>
+            UpdateResult(state, Some("Keine Challenge verfuegbar."), quit = false)
+          case Some(record) =>
+            challengeState(record) match
+              case Left(err) =>
+                UpdateResult(state, Some(s"Challenge konnte nicht geladen werden: $err"), quit = false)
+              case Right((game, challenge)) =>
+                val nextState = state.copy(
+                  game = game,
+                  startGame = game,
+                  moveHistory = Vector.empty,
+                  drawOfferedBy = None,
+                  resignedBy = None,
+                  drawAgreed = false,
+                  challengeMode = Some(challenge),
+                  challengeCompleted = false
+                )
+                UpdateResult(nextState, Some("Challenge gestartet."), quit = false)
         }
       case Right(Command.ImportFenCmd(fenStr)) =>
         state.parserChoice.fenParser.parse(fenStr) match
           case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
           case Right(newGame) =>
-            val nextState = state.copy(game = newGame, startGame = newGame, moveHistory = Vector.empty)
+            val nextState = state.copy(game = newGame, startGame = newGame, moveHistory = Vector.empty, challengeMode = None, challengeCompleted = false)
             if newGame.isCheckmate then
               val winner = colorLabel(newGame.sideToMove.other)
               Future.successful(UpdateResult(nextState, Some(s"Checkmate. $winner wins."), quit = true))
@@ -186,7 +333,9 @@ object Controller:
             val nextState = state.copy(
               game = imported.game,
               startGame = imported.startGame,
-              moveHistory = imported.moves
+              moveHistory = imported.moves,
+              challengeMode = None,
+              challengeCompleted = false
             )
             if imported.game.isCheckmate then
               val winner = colorLabel(imported.game.sideToMove.other)
