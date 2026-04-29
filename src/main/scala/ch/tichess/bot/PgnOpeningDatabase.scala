@@ -34,9 +34,12 @@ class PgnOpeningDatabase(implicit ec: ExecutionContext) extends OpeningDatabase:
    * games start with an [Event "..."] tag.
    */
   def loadFromPgnString(pgnData: String, maxMovesPerGame: Int = 20): Int =
+    // Normalize line endings (Windows \r\n → \n)
+    val normalized = pgnData.replace("\r\n", "\n").replace("\r", "\n")
     // Split by [Event to separate multiple games in a single file
-    val rawGames = pgnData.split("(?=\\[Event )").map(_.trim).filter(_.nonEmpty)
+    val rawGames = normalized.split("(?=\\[Event )").map(_.trim).filter(_.nonEmpty)
     var loadedCount = 0
+    var errorCount  = 0
 
     for gameStr <- rawGames do
       Pgn.parse(gameStr) match
@@ -69,8 +72,11 @@ class PgnOpeningDatabase(implicit ec: ExecutionContext) extends OpeningDatabase:
             currentGame = currentGame.applyMove(move).toOption.getOrElse(currentGame)
           
           loadedCount += 1
-        case Left(_) => // Silently ignore unparseable games in the bulk import
+        case Left(_) =>
+          errorCount += 1 // Count but silently ignore parse failures
 
+    if errorCount > 0 then
+      println(s"[OpeningDB] Warning: $errorCount games could not be parsed and were skipped.")
     loadedCount
 
   /**

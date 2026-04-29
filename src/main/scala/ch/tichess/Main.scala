@@ -2,14 +2,39 @@ package ch.tichess
 
 import ch.tichess.controller.Controller
 import ch.tichess.view.ConsoleView
+import akka.actor.typed.ActorSystem
+import akka.actor.typed.scaladsl.Behaviors
+import scala.concurrent.ExecutionContext
 
 object Main:
   def main(args: Array[String]): Unit =
-    mainWith(ConsoleApp.LiveStdIO, args)
+    if args.contains("bot") then
+      startBotMode()
+    else
+      mainWith(ConsoleApp.LiveStdIO, args)
 
   def mainWith(io: ConsoleApp.IO, args: Array[String]): Unit =
-    if args.nonEmpty then ConsoleApp.run(ConsoleApp.ScriptIO(args.toList, io.writeLine))
+    if args.nonEmpty && !args.contains("bot") then ConsoleApp.run(ConsoleApp.ScriptIO(args.toList, io.writeLine))
     else ConsoleApp.run(io)
+
+  private def startBotMode(): Unit =
+    val token = sys.env.getOrElse("LICHESS_TOKEN", {
+      System.err.println("Error: LICHESS_TOKEN environment variable is not set.")
+      sys.exit(1)
+    })
+
+    implicit val system: ActorSystem[Nothing] = ActorSystem(Behaviors.empty, "LichessBotSystem")
+    implicit val ec: ExecutionContext = system.executionContext
+
+    val client = new ch.tichess.bot.lichess.LichessClient(token)
+    val bot = new ch.tichess.bot.AlphaBetaBot(5000L, Some(Controller.openingDb))
+    
+    val runner = new ch.tichess.bot.lichess.LichessBotRunner(client, bot)
+    runner.start()
+    
+    // Keep application alive
+    scala.io.StdIn.readLine("Bot is running. Press ENTER to stop...\n")
+    system.terminate()
 
 object ConsoleApp:
   trait IO:

@@ -105,9 +105,10 @@ object Controller:
   lazy val openingDb: ch.tichess.bot.PgnOpeningDatabase = {
     import scala.concurrent.ExecutionContext.Implicits.global
     val db = new ch.tichess.bot.PgnOpeningDatabase()
-    scala.util.Using(scala.io.Source.fromResource("openings.pgn")) { source =>
+    val loaded = scala.util.Using(scala.io.Source.fromResource("openings.pgn")) { source =>
       db.loadFromPgnString(source.mkString)
-    }
+    }.getOrElse(0)
+    println(s"[OpeningDB] Loaded $loaded games → ${db.positionCount} unique positions.")
     db
   }
 

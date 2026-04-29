@@ -16,16 +16,32 @@ final case class OpeningMoveStats(
     losses: Int
 ):
   /**
-   * Simple score for a move based on win/draw/loss ratio and frequency.
-   * A move played more often with better results gets a higher score.
+   * Bayesian-smoothed score for this move.
+   *
+   * A plain win-rate (wins/played) is unreliable for moves with few games —
+   * a move played once and won gets 100%, beating e2e4 with 60% over 40k games.
+   *
+   * We fix this with Bayesian smoothing: we add a neutral 50% result prior
+   * so that rare moves regress towards "playable but unproven" until enough
+   * real data exists.
+   *
+   * Additionally, we score the lower bound of the expected result and multiply
+   * by an uncapped confidence weight. That makes the book prefer robust main
+   * lines over suspicious sidelines with a noisy high win rate.
    */
   def score: Double =
-    if played == 0 then 0.0
-    else
-      // Weight wins higher than draws, losses negatively.
-      val winRate = wins.toDouble / played
-      val drawRate = draws.toDouble / played
-      winRate + (0.5 * drawRate)
+    val smoothing = 20.0
+    val priorResult = 0.50
+
+    val effectivePlayed = played + smoothing
+    val result =
+      (wins + 0.5 * draws + smoothing * priorResult) / effectivePlayed
+
+    val uncertainty = Math.sqrt(result * (1.0 - result) / effectivePlayed)
+    val conservativeResult = result - 1.15 * uncertainty
+    val confidence = Math.log1p(played)
+
+    conservativeResult * confidence
 
 /**
  * Interface for the Opening Book / Database.

@@ -11,3 +11,10 @@ target/
 .scala-build/
 .idea/
 .vscode/
+
+# local Syzygy tablebases are large; configure their path with SYZYGY_PATH
+*.rtbw
+*.rtbz
+syzygy/
+tablebases/
+src/main/resources/3-4-5_pieces_Syzygy/
