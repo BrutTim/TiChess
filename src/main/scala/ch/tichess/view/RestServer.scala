@@ -469,7 +469,6 @@ object RestServer extends JsonSupport:
                 |    }
                 |    async function startTimedGame() {
                 |        if (challengeActive) return;
-                |        await sendCommand('new', { skipFetch: true });
                 |        clockBaseMs = selectedModeMs();
                 |        whiteRemainingMs = clockBaseMs;
                 |        blackRemainingMs = clockBaseMs;

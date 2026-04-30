@@ -88,19 +88,12 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
   private val maxTranspositionEntries = 1000000
   private val syzygyTablebase = SyzygyTablebase.fromEnv()
 
-  override def chooseMove(state: AppState, remainingTimeMs: Option[Long] = None): Future[Either[String, Move]] =
+  override def chooseMove(state: AppState, remainingTimeMs: Option[Long] = None, incrementMs: Option[Long] = None): Future[Either[String, Move]] =
     val game = state.game
     val legal = game.legalMoves
     if legal.isEmpty then Future.successful(Left("No legal moves available."))
     else
-      // Dynamic time management: 10m -> 10s, 5m -> 5s, 1m -> 1s (time / 60)
-      // Cap at 10 seconds to avoid excessive thinking in unlimited/long games.
-      val budget = remainingTimeMs match
-        case Some(ms) =>
-          if ms > 5 * 60 * 1000 then 10000L      // Über 5 Min: 10s
-          else if ms > 1 * 60 * 1000 then 5000L // 1 bis 5 Min: 5s
-          else 1000L                            // Unter 1 Min: 1s
-        case None => thinkTimeMs
+      val budget = searchBudget(remainingTimeMs, incrementMs)
 
       val normalizedFen = Fen.encodeNormalized(game)
       
@@ -112,16 +105,61 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
 
       dbFuture.flatMap { dbMoves =>
         val validDbMoves = dbMoves.filter(m => legal.contains(m.move))
-        if validDbMoves.nonEmpty then
-          // Pick the best known move from the database
-          val bestDbMove = validDbMoves.maxBy(_.score).move
-          Future.successful(Right(bestDbMove))
-        else syzygyTablebase.flatMap(_.bestMove(game)).filter(legal.contains) match
+        rootSyzygyMove(game, legal).orElse(syzygyTransitionMove(game, legal)) match
           case Some(tablebaseMove) =>
             Future.successful(Right(tablebaseMove))
+          case None if validDbMoves.nonEmpty =>
+            // Pick the best known move from the database
+            val bestDbMove = validDbMoves.maxBy(_.score).move
+            Future.successful(Right(bestDbMove))
           case None =>
             searchMoveAsync(game, legal, budget)
       }
+
+  private def rootSyzygyMove(game: Game, legal: List[Move]): Option[Move] =
+    syzygyTablebase.flatMap(_.probe(game)).filter(result => legal.contains(result.bestMove)).map { result =>
+      println(s"  syzygy | root ${result.label} | move ${result.bestMove}")
+      result.bestMove
+    }
+
+  private def syzygyTransitionMove(game: Game, legal: List[Move]): Option[Move] =
+    if game.board.allPieces.size != 6 then None
+    else
+      syzygyTablebase.flatMap { tablebase =>
+        val winningTransitions =
+          legal.flatMap { move =>
+            game.applyMove(move).toOption.flatMap { next =>
+              if !tablebase.canProbe(next) then None
+              else
+              tablebase.probe(next).flatMap { result =>
+                val ourWdl = -result.wdl
+                Option.when(ourWdl > 0)((move, result, transitionDtzScore(result.dtz)))
+              }
+            }
+          }
+
+        winningTransitions.sortBy(_._3).headOption.map { case (move, result, _) =>
+          println(s"  syzygy | transition win via $move | after move ${result.label}")
+          move
+        }
+      }
+
+  private def transitionDtzScore(childDtz: Int): Int =
+    Math.abs(childDtz)
+
+  private def searchBudget(remainingTimeMs: Option[Long], incrementMs: Option[Long]): Long =
+    remainingTimeMs match
+      case Some(ms) =>
+        if ms >= 24L * 60L * 60L * 1000L then thinkTimeMs
+        else
+          val increment = incrementMs.getOrElse(0L)
+          val base = ms / 35
+          val incrementBonus = increment * 8 / 10
+          val raw = base + incrementBonus
+          val normalCap = Math.max(500L, ms / 8)
+          val panicReserve = if ms > 3000L then 1000L else 100L
+          Math.max(300L, Math.min(raw, normalCap).min(Math.max(300L, ms - panicReserve)))
+      case None => thinkTimeMs
 
   private def searchMoveAsync(game: Game, legal: List[Move], budget: Long): Future[Either[String, Move]] =
     implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
@@ -141,7 +179,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
         while System.currentTimeMillis() < deadline do
           val startTime = System.nanoTime()
           val nodesBeforeDepth = context.nodes.get()
-          val (mv, score) = searchBestMove(game, legal, currentDepth, deadline, context)
+          val (mv, score) = searchBestMoveWithAspiration(game, legal, currentDepth, bestScoreSoFar, deadline, context)
           val durationNanos = System.nanoTime() - startTime
           val durationMs = durationNanos / 1000000L
           val totalNodes = context.nodes.get()
@@ -152,7 +190,10 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
           bestScoreSoFar = score
 
           // Info-Logging für dich
-          val scoreDesc = if Math.abs(score) > mateScore - 500 then s"MATE" else s"${score / 100.0}"
+          val scoreDesc =
+            if score >= mateScoreThreshold then s"MATE+${(mateScore - score).max(0)}"
+            else if score <= -mateScoreThreshold then s"MATE-${(mateScore + score).max(0)}"
+            else s"${score / 100.0}"
           println(s"  depth $currentDepth | score $scoreDesc | move $mv | nodes $depthNodes/$totalNodes | nps $nps | tt ${context.transpositionTable.size} | ${durationMs}ms")
 
           // If we found a mate, no need to search deeper
@@ -165,13 +206,36 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       Right(bestMoveSoFar)
     }
 
-  private def searchBestMove(game: Game, legal: List[Move], depth: Int, deadline: Long, context: SearchContext): (Move, Int) =
+  private def searchBestMoveWithAspiration(
+      game: Game,
+      legal: List[Move],
+      depth: Int,
+      previousScore: Int,
+      deadline: Long,
+      context: SearchContext
+  ): (Move, Int) =
+    if depth <= 1 || previousScore <= -mateScore / 2 then
+      searchBestMove(game, legal, depth, -mateScore * 2, mateScore * 2, deadline, context)
+    else
+      var window = 50
+      var alpha = previousScore - window
+      var beta = previousScore + window
+      var result = searchBestMove(game, legal, depth, alpha, beta, deadline, context)
+
+      while (result._2 <= alpha || result._2 >= beta) && System.currentTimeMillis() < deadline do
+        window *= 2
+        alpha = Math.max(-mateScore * 2, previousScore - window)
+        beta = Math.min(mateScore * 2, previousScore + window)
+        result = searchBestMove(game, legal, depth, alpha, beta, deadline, context)
+
+      result
+
+  private def searchBestMove(game: Game, legal: List[Move], depth: Int, alpha0: Int, beta: Int, deadline: Long, context: SearchContext): (Move, Int) =
     var bestMove = legal.head
     var bestScore = -mateScore * 2
 
-    var alpha = -mateScore * 2
-    val beta = mateScore * 2
-    val alphaOrig = alpha
+    var alpha = alpha0
+    val alphaOrig = alpha0
 
     val positionKey = transpositionKey(game, context)
     val ttBestMove = transpositionLookup(context, positionKey).flatMap(_.bestMove)
@@ -182,7 +246,13 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
 
       val mv = ordered(i)
       val next = applyMoveProfiled(game, mv, context)
-      val score = -negamax(next, depth - 1, -beta, -alpha, deadline, ply = 1, context)
+      val score =
+        if i == 0 then -negamax(next, depth - 1, -beta, -alpha, deadline, ply = 1, context)
+        else
+          var candidate = -negamax(next, depth - 1, -alpha - 1, -alpha, deadline, ply = 1, context)
+          if candidate > alpha && candidate < beta then
+            candidate = -negamax(next, depth - 1, -beta, -alpha, deadline, ply = 1, context)
+          candidate
 
       if score > bestScore then
         bestScore = score
@@ -237,7 +307,13 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
         while i < ordered.size && alpha < beta0 do
           val mv = ordered(i)
           val next = applyMoveProfiled(game, mv, context)
-          val score = -negamax(next, depth - 1, -beta0, -alpha, deadline, ply + 1, context)
+          val score =
+            if i == 0 then -negamax(next, depth - 1, -beta0, -alpha, deadline, ply + 1, context)
+            else
+              var candidate = -negamax(next, depth - 1, -alpha - 1, -alpha, deadline, ply + 1, context)
+              if candidate > alpha && candidate < beta0 then
+                candidate = -negamax(next, depth - 1, -beta0, -alpha, deadline, ply + 1, context)
+              candidate
           if score > best then
             best = score
             bestMove = Some(mv)
@@ -271,7 +347,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
     if standPat >= beta then return beta
     if standPat > alpha then alpha = standPat
 
-    val captures = legalMovesProfiled(game, context).filter(captureUrgency(game, _) > 0)
+    val captures = tacticalQuiescenceMoves(game, legalMovesProfiled(game, context), ply, context)
     val ordered = orderedMoves(game, captures, ttBestMove = None, ply, context)
     var i = 0
     while i < ordered.size && alpha < beta do
@@ -283,50 +359,104 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
 
     alpha
 
+  private def tacticalQuiescenceMoves(game: Game, legal: List[Move], ply: Int, context: SearchContext): List[Move] =
+    legal.filter { move =>
+      captureUrgency(game, move) > 0 || (ply <= 2 && givesCheck(game, move, context))
+    }
+
+  private def givesCheck(game: Game, move: Move, context: SearchContext): Boolean =
+    val next = applyMoveProfiled(game, move, context)
+    isInCheckProfiled(next, context)
+
   private val mateScore: Int = 100000
   private val mateScoreThreshold: Int = mateScore - 1000
 
   // ─── PeSTO Evaluation ────────────────────────────────────────────────────
 
-  /**
-   * Compute the game phase (0 = pure endgame, PestoTables.totalPhase = full middlegame)
-   * based on the non-pawn, non-king material still on the board.
-   */
-  private def gamePhase(game: Game): Int =
-    val phase = game.board.allPieces.values.foldLeft(0) { (acc, piece) =>
-      acc + PestoTables.phaseWeight.getOrElse(piece.kind, 0)
-    }
-    Math.min(phase, PestoTables.totalPhase)
+  private final case class EvalContext(
+      game: Game,
+      board: Board,
+      whitePieces: List[(Pos, Piece)],
+      blackPieces: List[(Pos, Piece)],
+      whitePawns: List[Pos],
+      blackPawns: List[Pos],
+      whiteKing: Option[Pos],
+      blackKing: Option[Pos],
+      whiteQueen: Option[Pos],
+      blackQueen: Option[Pos],
+      phase: Int
+  ):
+    def piecesOf(color: Color): List[(Pos, Piece)] =
+      if color == Color.White then whitePieces else blackPieces
+
+    def pawnsOf(color: Color): List[Pos] =
+      if color == Color.White then whitePawns else blackPawns
+
+    def kingOf(color: Color): Option[Pos] =
+      if color == Color.White then whiteKing else blackKing
+
+    def queenOf(color: Color): Option[Pos] =
+      if color == Color.White then whiteQueen else blackQueen
+
+  private object EvalContext:
+    def from(game: Game): EvalContext =
+      val pieces = game.board.allPieces.toList
+      val whitePieces = pieces.collect { case entry @ (_, Piece(Color.White, _)) => entry }
+      val blackPieces = pieces.collect { case entry @ (_, Piece(Color.Black, _)) => entry }
+      val whitePawns = whitePieces.collect { case (pos, Piece(_, PieceType.Pawn)) => pos }
+      val blackPawns = blackPieces.collect { case (pos, Piece(_, PieceType.Pawn)) => pos }
+      val whiteKing = whitePieces.collectFirst { case (pos, Piece(_, PieceType.King)) => pos }
+      val blackKing = blackPieces.collectFirst { case (pos, Piece(_, PieceType.King)) => pos }
+      val whiteQueen = whitePieces.collectFirst { case (pos, Piece(_, PieceType.Queen)) => pos }
+      val blackQueen = blackPieces.collectFirst { case (pos, Piece(_, PieceType.Queen)) => pos }
+      val phase =
+        pieces.foldLeft(0) { case (acc, (_, piece)) =>
+          acc + PestoTables.phaseWeight.getOrElse(piece.kind, 0)
+        }
+
+      EvalContext(
+        game,
+        game.board,
+        whitePieces,
+        blackPieces,
+        whitePawns,
+        blackPawns,
+        whiteKing,
+        blackKing,
+        whiteQueen,
+        blackQueen,
+        Math.min(phase, PestoTables.totalPhase)
+      )
 
   /**
    * Score all pieces for one color using PeSTO material + PST values,
    * interpolated between middlegame and endgame.
    */
-  private def colorScore(game: Game, isWhite: Boolean, phase: Int): Int =
-    game.board.allPieces.collect {
-      case (pos, piece) if (piece.color == Color.White) == isWhite =>
-        PestoTables.pieceScore(piece.kind, pos, isWhite, phase)
+  private def colorScore(pieces: List[(Pos, Piece)], isWhite: Boolean, phase: Int): Int =
+    pieces.map { case (pos, piece) =>
+      PestoTables.pieceScore(piece.kind, pos, isWhite, phase)
     }.sum
 
   private def staticEvaluate(game: Game): Int =
-    val phase = gamePhase(game)
-    val whiteScore = colorScore(game, isWhite = true,  phase)
-    val blackScore = colorScore(game, isWhite = false, phase)
+    val eval = EvalContext.from(game)
+    val phase = eval.phase
+    val whiteScore = colorScore(eval.whitePieces, isWhite = true,  phase)
+    val blackScore = colorScore(eval.blackPieces, isWhite = false, phase)
     val diff =
       whiteScore - blackScore +
-        pawnStructureScore(game.board, Color.White) - pawnStructureScore(game.board, Color.Black) +
-        kingSafetyScore(game, Color.White) - kingSafetyScore(game, Color.Black) +
-        pieceActivityScore(game, Color.White, phase) - pieceActivityScore(game, Color.Black, phase) +
-        queenInvasionScore(game, Color.White, phase) - queenInvasionScore(game, Color.Black, phase) +
-        mobilityScore(game.board, Color.White, phase) - mobilityScore(game.board, Color.Black, phase) +
-        hangingPiecesScore(game.board, Color.White) - hangingPiecesScore(game.board, Color.Black)
+        pawnStructureScore(eval, Color.White) - pawnStructureScore(eval, Color.Black) +
+        kingSafetyScore(eval, Color.White) - kingSafetyScore(eval, Color.Black) +
+        pieceActivityScore(eval, Color.White) - pieceActivityScore(eval, Color.Black) +
+        queenInvasionScore(eval, Color.White) - queenInvasionScore(eval, Color.Black) +
+        mobilityScore(eval, Color.White) - mobilityScore(eval, Color.Black) +
+        hangingPiecesScore(eval, Color.White) - hangingPiecesScore(eval, Color.Black)
     game.sideToMove match
       case Color.White => diff
       case Color.Black => -diff
 
-  private def pawnStructureScore(board: Board, color: Color): Int =
-    val ownPawns = pawnsOf(board, color)
-    val enemyPawns = pawnsOf(board, color.other)
+  private def pawnStructureScore(eval: EvalContext, color: Color): Int =
+    val ownPawns = eval.pawnsOf(color)
+    val enemyPawns = eval.pawnsOf(color.other)
     val pawnsByFile = ownPawns.groupBy(_.file)
 
     ownPawns.map { pawn =>
@@ -342,20 +472,21 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       doubledPenalty + isolatedPenalty + backwardPenalty + passedBonus
     }.sum
 
-  private def kingSafetyScore(game: Game, color: Color): Int =
-    findKing(game.board, color) match
+  private def kingSafetyScore(eval: EvalContext, color: Color): Int =
+    eval.kingOf(color) match
       case None => 0
       case Some(king) =>
         val homeRank = if color == Color.White then 0 else 7
         val castledBonus =
           if king.rank == homeRank && (king.file == 6 || king.file == 2) then 35
-          else if king.rank == homeRank && king.file == 4 && hasCastlingRight(game, color) then 10
-          else if gamePhase(game) > PestoTables.totalPhase / 2 then -20
+          else if king.rank == homeRank && king.file == 4 && hasCastlingRight(eval.game, color) then 10
+          else if eval.phase > PestoTables.totalPhase / 2 then -20
           else 0
 
-        val shieldScore = pawnShieldScore(game.board, color, king)
-        val openFilePenalty = kingFileExposurePenalty(game.board, color, king)
-        castledBonus + shieldScore - openFilePenalty
+        val shieldScore = pawnShieldScore(eval.board, color, king)
+        val openFilePenalty = kingFileExposurePenalty(eval, color, king)
+        val dangerPenalty = kingAttackDangerPenalty(eval, color, king)
+        castledBonus + shieldScore - openFilePenalty - dangerPenalty
 
   private def pawnShieldScore(board: Board, color: Color, king: Pos): Int =
     val dir = pawnDirection(color)
@@ -368,15 +499,12 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       else 0
     }.sum
 
-  private def kingFileExposurePenalty(board: Board, color: Color, king: Pos): Int =
+  private def kingFileExposurePenalty(eval: EvalContext, color: Color, king: Pos): Int =
     adjacentFilesInclusive(king.file).map { file =>
-      val ownPawnOnFile = board.allPieces.exists {
-        case (pos, Piece(c, PieceType.Pawn)) => c == color && pos.file == file
-        case _ => false
-      }
-      val enemyHeavyOnFile = board.allPieces.exists {
-        case (pos, Piece(c, kind)) =>
-          c == color.other && pos.file == file && (kind == PieceType.Rook || kind == PieceType.Queen)
+      val ownPawnOnFile = eval.pawnsOf(color).exists(_.file == file)
+      val enemyHeavyOnFile = eval.piecesOf(color.other).exists {
+        case (pos, Piece(_, kind)) =>
+          pos.file == file && (kind == PieceType.Rook || kind == PieceType.Queen)
       }
 
       val openPenalty = if ownPawnOnFile then 0 else 14
@@ -384,15 +512,51 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       openPenalty + heavyPenalty
     }.sum
 
-  private def pawnsOf(board: Board, color: Color): List[Pos] =
-    board.allPieces.collect {
-      case (pos, Piece(c, PieceType.Pawn)) if c == color => pos
-    }.toList
+  private def kingAttackDangerPenalty(eval: EvalContext, color: Color, king: Pos): Int =
+    val enemyPieces = eval.piecesOf(color.other)
+    val zone = kingZone(king)
+    val attackedZoneSquares =
+      zone.count(square => enemyPieces.exists { case (from, piece) => attacksSquare(eval.board, from, piece, square) })
 
-  private def findKing(board: Board, color: Color): Option[Pos] =
-    board.allPieces.collectFirst {
-      case (pos, Piece(c, PieceType.King)) if c == color => pos
+    val closeEnemyQueenPenalty =
+      eval.queenOf(color.other) match
+        case Some(queen) =>
+          val distance = Math.max(Math.abs(queen.file - king.file), Math.abs(queen.rank - king.rank))
+          if distance <= 2 then 65
+          else if distance <= 3 then 30
+          else 0
+        case None => 0
+
+    val closeMinorPenalty = enemyPieces.collect {
+      case (pos, Piece(_, kind)) if kind == PieceType.Knight || kind == PieceType.Bishop =>
+        val distance = Math.max(Math.abs(pos.file - king.file), Math.abs(pos.rank - king.rank))
+        if distance <= 2 then 18 else 0
+    }.sum
+
+    val openLinePenalty = kingLinePressurePenalty(eval, color, king)
+    attackedZoneSquares * 12 + closeEnemyQueenPenalty + closeMinorPenalty + openLinePenalty
+
+  private def kingZone(king: Pos): List[Pos] =
+    (for
+      df <- -1 to 1
+      dr <- -1 to 1
+      pos = Pos(king.file + df, king.rank + dr)
+      if pos.inBounds
+    yield pos).toList
+
+  private def kingLinePressurePenalty(eval: EvalContext, color: Color, king: Pos): Int =
+    val heavyPieces = eval.piecesOf(color.other).collect {
+      case entry @ (_, Piece(_, kind)) if kind == PieceType.Rook || kind == PieceType.Queen => entry
     }
+    heavyPieces.map {
+      case (pos, Piece(_, kind)) =>
+        val sameFile = pos.file == king.file
+        val sameRank = pos.rank == king.rank
+        val sameDiagonal = Math.abs(pos.file - king.file) == Math.abs(pos.rank - king.rank)
+        if (sameFile || sameRank || sameDiagonal) && clearPath(eval.board, pos, king) then
+          if kind == PieceType.Queen then 35 else 22
+        else 0
+    }.sum
 
   private def isPassedPawn(pawn: Pos, color: Color, enemyPawns: List[Pos]): Boolean =
     enemyPawns.forall { enemy =>
@@ -430,11 +594,12 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       case Color.White => game.castlingRights.whiteKingside || game.castlingRights.whiteQueenside
       case Color.Black => game.castlingRights.blackKingside || game.castlingRights.blackQueenside
 
-  private def pieceActivityScore(game: Game, color: Color, phase: Int): Int =
-    val board = game.board
-    val ownPieces = board.allPieces.collect { case (pos, piece) if piece.color == color => (pos, piece) }.toList
+  private def pieceActivityScore(eval: EvalContext, color: Color): Int =
+    val board = eval.board
+    val phase = eval.phase
+    val ownPieces = eval.piecesOf(color)
     val bishopPairBonus = if ownPieces.count(_._2.kind == PieceType.Bishop) >= 2 then 35 else 0
-    val queenPenalty = earlyQueenPenalty(game, ownPieces, color, phase)
+    val queenPenalty = earlyQueenPenalty(eval, ownPieces, color)
 
     ownPieces.map {
       case (pos, Piece(_, PieceType.Knight)) =>
@@ -443,14 +608,14 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
           if pos.file >= 2 && pos.file <= 5 && pos.rank >= 2 && pos.rank <= 5 then 10 else 0
         rimPenalty + centerBonus
       case (pos, Piece(_, PieceType.Rook)) =>
-        rookFileBonus(board, color, pos) + seventhRankBonus(pos, color, 18)
+        rookFileBonus(eval, color, pos) + seventhRankBonus(pos, color, 18)
       case (pos, Piece(_, PieceType.Queen)) =>
-        queenActivityBonus(game, color, pos, phase)
+        queenActivityBonus(eval, color, pos)
       case _ => 0
     }.sum + bishopPairBonus + queenPenalty
 
-  private def earlyQueenPenalty(game: Game, ownPieces: List[(Pos, Piece)], color: Color, phase: Int): Int =
-    if !isOpeningPhase(phase) then 0
+  private def earlyQueenPenalty(eval: EvalContext, ownPieces: List[(Pos, Piece)], color: Color): Int =
+    if !isOpeningPhase(eval.phase) then 0
     else
       val homeRank = if color == Color.White then 0 else 7
       val queenHome = Pos(3, homeRank)
@@ -460,15 +625,15 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
             case (pos, Piece(_, kind)) =>
               (kind == PieceType.Knight || kind == PieceType.Bishop) && pos.rank == homeRank
           }
-          val uncastledPenalty = if !kingIsSafe(game, color) then 18 else 0
+          val uncastledPenalty = if !kingIsSafe(eval, color) then 18 else 0
           -20 - undevelopedMinors * 12 - uncastledPenalty
         case _ => 0
 
-  private def queenInvasionScore(game: Game, color: Color, phase: Int): Int =
-    if !isOpeningPhase(phase) then 0
+  private def queenInvasionScore(eval: EvalContext, color: Color): Int =
+    if !isOpeningPhase(eval.phase) then 0
     else
-      findQueen(game.board, color) match
-        case Some(queen) if !kingIsSafe(game, color) =>
+      eval.queenOf(color) match
+        case Some(queen) if !kingIsSafe(eval, color) =>
           val invadedEnemyHalf =
             color match
               case Color.White => queen.rank >= 4
@@ -479,13 +644,13 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
           -invasionPenalty
         case _ => 0
 
-  private def queenActivityBonus(game: Game, color: Color, queen: Pos, phase: Int): Int =
-    if isOpeningPhase(phase) then 0
+  private def queenActivityBonus(eval: EvalContext, color: Color, queen: Pos): Int =
+    if isOpeningPhase(eval.phase) then 0
     else
       val centralBonus =
         if queen.file >= 2 && queen.file <= 5 && queen.rank >= 2 && queen.rank <= 5 then 18 else 0
       val safeInvasionBonus =
-        if kingIsSafe(game, color) && isInEnemyHalf(queen, color) then 45 else 0
+        if kingIsSafe(eval, color) && isInEnemyHalf(queen, color) then 45 else 0
       seventhRankBonus(queen, color, 8) + centralBonus + safeInvasionBonus
 
   private def isInEnemyHalf(pos: Pos, color: Color): Boolean =
@@ -493,13 +658,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       case Color.White => pos.rank >= 4
       case Color.Black => pos.rank <= 3
 
-  private def findQueen(board: Board, color: Color): Option[Pos] =
-    board.allPieces.collectFirst {
-      case (pos, Piece(c, PieceType.Queen)) if c == color => pos
-    }
-
-  private def kingIsSafe(game: Game, color: Color): Boolean =
-    findKing(game.board, color).exists { king =>
+  private def kingIsSafe(eval: EvalContext, color: Color): Boolean =
+    eval.kingOf(color).exists { king =>
       val homeRank = if color == Color.White then 0 else 7
       king.rank == homeRank && (king.file == 6 || king.file == 2)
     }
@@ -507,15 +667,9 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
   private def isOpeningPhase(phase: Int): Boolean =
     phase > PestoTables.totalPhase * 2 / 3
 
-  private def rookFileBonus(board: Board, color: Color, rook: Pos): Int =
-    val ownPawnOnFile = board.allPieces.exists {
-      case (pos, Piece(c, PieceType.Pawn)) => c == color && pos.file == rook.file
-      case _ => false
-    }
-    val enemyPawnOnFile = board.allPieces.exists {
-      case (pos, Piece(c, PieceType.Pawn)) => c == color.other && pos.file == rook.file
-      case _ => false
-    }
+  private def rookFileBonus(eval: EvalContext, color: Color, rook: Pos): Int =
+    val ownPawnOnFile = eval.pawnsOf(color).exists(_.file == rook.file)
+    val enemyPawnOnFile = eval.pawnsOf(color.other).exists(_.file == rook.file)
 
     if !ownPawnOnFile && !enemyPawnOnFile then 28
     else if !ownPawnOnFile && enemyPawnOnFile then 16
@@ -525,14 +679,15 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
     val targetRank = if color == Color.White then 6 else 1
     if pos.rank == targetRank then bonus else 0
 
-  private def mobilityScore(board: Board, color: Color, phase: Int): Int =
-    board.allPieces.collect {
-      case (pos, Piece(c, kind)) if c == color =>
+  private def mobilityScore(eval: EvalContext, color: Color): Int =
+    val board = eval.board
+    eval.piecesOf(color).map {
+      case (pos, Piece(_, kind)) =>
         kind match
           case PieceType.Knight => knightMobility(board, color, pos) * 4
           case PieceType.Bishop => slidingMobility(board, color, pos, bishopDirections) * 3
           case PieceType.Rook   => slidingMobility(board, color, pos, rookDirections) * 2
-          case PieceType.Queen  => if isOpeningPhase(phase) then 0 else slidingMobility(board, color, pos, queenDirections)
+          case PieceType.Queen  => if isOpeningPhase(eval.phase) then 0 else slidingMobility(board, color, pos, queenDirections)
           case PieceType.Pawn   => pawnMobility(board, color, pos) * 2
           case PieceType.King   => 0
     }.sum
@@ -582,26 +737,38 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
   private val queenDirections: List[(Int, Int)] =
     bishopDirections ++ rookDirections
 
-  private def hangingPiecesScore(board: Board, color: Color): Int =
-    board.allPieces.collect {
-      case (pos, piece) if piece.color == color && piece.kind != PieceType.King =>
-        val attackers = attackersOf(board, pos, color.other)
-        if attackers.isEmpty then 0
-        else
-          val defenders = attackersOf(board, pos, color)
-          val leastAttacker = attackers.map(piece => pieceValue(piece.kind)).min
-          val victim = pieceValue(piece.kind)
-          val basePenalty =
-            if defenders.isEmpty then victim / 3
-            else if leastAttacker < victim then victim / 8
-            else 0
-          -Math.min(basePenalty, 300)
+  private def hangingPiecesScore(eval: EvalContext, color: Color): Int =
+    val board = eval.board
+    val attackers = eval.piecesOf(color.other)
+    val defenders = eval.piecesOf(color)
+    defenders.collect {
+      case (pos, piece) if piece.kind != PieceType.King =>
+        leastAttackerValue(board, attackers, pos) match
+          case None => 0
+          case Some(leastAttacker) =>
+            val defended = isAttackedBy(board, defenders, pos)
+            val victim = pieceValue(piece.kind)
+            val basePenalty =
+              if !defended then victim / 3
+              else if leastAttacker < victim then victim / 8
+              else 0
+            -Math.min(basePenalty, 300)
     }.sum
 
-  private def attackersOf(board: Board, target: Pos, byColor: Color): List[Piece] =
-    board.allPieces.collect {
-      case (from, piece) if piece.color == byColor && attacksSquare(board, from, piece, target) => piece
-    }.toList
+  private def leastAttackerValue(board: Board, candidates: List[(Pos, Piece)], target: Pos): Option[Int] =
+    var best = Int.MaxValue
+    var found = false
+    candidates.foreach { case (from, piece) =>
+      if attacksSquare(board, from, piece, target) then
+        best = Math.min(best, pieceValue(piece.kind))
+        found = true
+    }
+    if found then Some(best) else None
+
+  private def isAttackedBy(board: Board, candidates: List[(Pos, Piece)], target: Pos): Boolean =
+    candidates.exists { case (from, piece) =>
+      attacksSquare(board, from, piece, target)
+    }
 
   private def attacksSquare(board: Board, from: Pos, piece: Piece, target: Pos): Boolean =
     if from == target then false

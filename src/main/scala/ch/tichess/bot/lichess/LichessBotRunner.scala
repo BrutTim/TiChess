@@ -36,24 +36,34 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
   private def startGameLoop(gameId: String, botColor: Color): Unit =
     var startGame = Game.initial
     var currentState = AppState(startGame)
+    var whiteIncrementMs: Option[Long] = None
+    var blackIncrementMs: Option[Long] = None
 
     client.streamGameEvents(gameId).runWith(Sink.foreach { event =>
       event.`type` match
         case "gameFull" =>
           event.state.foreach { st =>
             val time = if botColor == Color.White then st.wtime else st.btime
+            whiteIncrementMs = st.winc.orElse(whiteIncrementMs)
+            blackIncrementMs = st.binc.orElse(blackIncrementMs)
+            val increment = if botColor == Color.White then whiteIncrementMs else blackIncrementMs
             startGame = parseInitialFen(event.initialFen).getOrElse(Game.initial)
             val fenInfo = event.initialFen.map(_ => ", custom initial FEN").getOrElse("")
             println(s"Game $gameId: full state received (${st.moves.split("\\s+").count(_.nonEmpty)} moves, status ${st.status}$fenInfo).")
             currentState = syncState(st.moves, startGame, gameId)
-            checkTurnAndPlay(gameId, currentState, botColor, time)
+            checkTurnAndPlay(gameId, currentState, botColor, time, increment)
           }
         case "gameState" =>
           val time = if botColor == Color.White then event.wtime else event.btime
+          event.state.foreach { st =>
+            whiteIncrementMs = st.winc.orElse(whiteIncrementMs)
+            blackIncrementMs = st.binc.orElse(blackIncrementMs)
+          }
+          val increment = if botColor == Color.White then whiteIncrementMs else blackIncrementMs
           val moves = event.moves.getOrElse("")
           println(s"Game $gameId: state update (${moves.split("\\s+").count(_.nonEmpty)} moves, status ${event.status.getOrElse("?")}).")
           currentState = syncState(moves, startGame, gameId)
-          checkTurnAndPlay(gameId, currentState, botColor, time)
+          checkTurnAndPlay(gameId, currentState, botColor, time, increment)
         case _ => // chatLine etc.
     }).failed.foreach(e => println(s"Game loop $gameId failed: ${e.getMessage}"))
 
@@ -84,13 +94,14 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
       }
       AppState(finalGame)
 
-  private def checkTurnAndPlay(gameId: String, state: AppState, botColor: Color, timeMs: Option[Long]): Unit =
+  private def checkTurnAndPlay(gameId: String, state: AppState, botColor: Color, timeMs: Option[Long], incrementMs: Option[Long]): Unit =
     if state.game.isCheckmate || state.game.isDraw then
       println(s"Game $gameId is over.")
     else if state.game.sideToMove == botColor then
-      val timeInfo = timeMs.map(ms => s" (${ms / 1000}s left)").getOrElse("")
+      val incrementInfo = incrementMs.map(ms => s", +${ms / 1000.0}s").getOrElse("")
+      val timeInfo = timeMs.map(ms => s" (${ms / 1000}s left$incrementInfo)").getOrElse("")
       println(s"Game $gameId: Bot is thinking$timeInfo...")
-      bot.chooseMove(state, timeMs).flatMap {
+      bot.chooseMove(state, timeMs, incrementMs).flatMap {
         case Left(err) =>
           println(s"Game $gameId: Bot failed to find move: $err")
           Future.unit

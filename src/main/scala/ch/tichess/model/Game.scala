@@ -12,19 +12,16 @@ final case class Game(
   def isDraw: Boolean = Rules.isDraw(this)
 
   def legalMoves: List[Move] =
-    val ownPositions =
-      board.allPieces.collect { case (pos, piece) if piece.color == sideToMove => pos }.toList
-    val allTargets =
-      (0 until 8).flatMap(file => (0 until 8).map(rank => Pos(file, rank))).toList
+    val candidates =
+      board.allPieces.toList.flatMap {
+        case (from, piece) if piece.color == sideToMove => pseudoMoves(from, piece)
+        case _ => Nil
+      }
 
-    ownPositions.flatMap { from =>
-      allTargets.flatMap { to =>
-        candidateMoves(from, to).flatMap { move =>
-          Rules.validateMove(this, move).toOption.flatMap { _ =>
-            applyMoveToBoard(move).toOption.flatMap { nextBoard =>
-              if Rules.isInCheck(nextBoard, sideToMove) then None else Some(move)
-            }
-          }
+    candidates.flatMap { move =>
+      Rules.validateMove(this, move).toOption.flatMap { _ =>
+        applyMoveToBoard(move).toOption.flatMap { nextBoard =>
+          if Rules.isInCheck(nextBoard, sideToMove) then None else Some(move)
         }
       }
     }
@@ -66,12 +63,90 @@ final case class Game(
 
       Game(nextBoard, sideToMove.other, nextCastling, newEnPassant, newHalfMove, newFullMove)
 
-  private def candidateMoves(from: Pos, to: Pos): List[Move] =
-    board.pieceAt(from) match
-      case Some(Piece(color, PieceType.Pawn)) if promotionRank(color, to.rank) =>
-        PromotionRole.values.toList.map(role => Move(from, to, Some(role)))
-      case _ =>
-        List(Move(from, to))
+  private def pseudoMoves(from: Pos, piece: Piece): List[Move] =
+    piece.kind match
+      case PieceType.Pawn   => pseudoPawnMoves(from, piece.color)
+      case PieceType.Knight => pseudoLeaperMoves(from, knightOffsets)
+      case PieceType.Bishop => pseudoSlidingMoves(from, bishopDirections)
+      case PieceType.Rook   => pseudoSlidingMoves(from, rookDirections)
+      case PieceType.Queen  => pseudoSlidingMoves(from, queenDirections)
+      case PieceType.King   => pseudoKingMoves(from)
+
+  private def pseudoPawnMoves(from: Pos, color: Color): List[Move] =
+    val dir = if color == Color.White then 1 else -1
+    val startRank = if color == Color.White then 1 else 6
+    val oneForward = from + (0, dir)
+    val twoForward = from + (0, 2 * dir)
+    val captures = List(from + (-1, dir), from + (1, dir))
+
+    val quietMoves =
+      if oneForward.inBounds && board.isEmpty(oneForward) then
+        val single = movesWithPromotion(from, oneForward, color)
+        if from.rank == startRank && twoForward.inBounds && board.isEmpty(twoForward) then
+          single :+ Move(from, twoForward)
+        else single
+      else Nil
+
+    val captureMoves =
+      captures.flatMap { to =>
+        val capturesEnemy = to.inBounds && board.pieceAt(to).exists(_.color != color)
+        val capturesEnPassant = enPassantTarget.contains(to)
+        if capturesEnemy || capturesEnPassant then movesWithPromotion(from, to, color)
+        else Nil
+      }
+
+    quietMoves ++ captureMoves
+
+  private def movesWithPromotion(from: Pos, to: Pos, color: Color): List[Move] =
+    if promotionRank(color, to.rank) then
+      PromotionRole.values.toList.map(role => Move(from, to, Some(role)))
+    else List(Move(from, to))
+
+  private def pseudoLeaperMoves(from: Pos, offsets: List[(Int, Int)]): List[Move] =
+    offsets.flatMap { offset =>
+      val to = from + offset
+      if canMoveTo(to) then Some(Move(from, to)) else None
+    }
+
+  private def pseudoSlidingMoves(from: Pos, directions: List[(Int, Int)]): List[Move] =
+    directions.flatMap(direction => rayMoves(from, direction))
+
+  private def rayMoves(from: Pos, direction: (Int, Int)): List[Move] =
+    val moves = scala.collection.mutable.ListBuffer.empty[Move]
+    var current = from + direction
+    var blocked = false
+    while current.inBounds && !blocked do
+      board.pieceAt(current) match
+        case None =>
+          moves += Move(from, current)
+          current = current + direction
+        case Some(piece) =>
+          if piece.color != sideToMove then moves += Move(from, current)
+          blocked = true
+    moves.toList
+
+  private def pseudoKingMoves(from: Pos): List[Move] =
+    val normalMoves = pseudoLeaperMoves(from, kingOffsets)
+    val castlingMoves = List(Move(from, from + (2, 0)), Move(from, from + (-2, 0))).filter(move => move.to.inBounds)
+    normalMoves ++ castlingMoves
+
+  private def canMoveTo(to: Pos): Boolean =
+    to.inBounds && !board.pieceAt(to).exists(_.color == sideToMove)
+
+  private val knightOffsets: List[(Int, Int)] =
+    List((1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2))
+
+  private val kingOffsets: List[(Int, Int)] =
+    List((1, 1), (1, 0), (1, -1), (0, 1), (0, -1), (-1, 1), (-1, 0), (-1, -1))
+
+  private val bishopDirections: List[(Int, Int)] =
+    List((1, 1), (1, -1), (-1, 1), (-1, -1))
+
+  private val rookDirections: List[(Int, Int)] =
+    List((1, 0), (-1, 0), (0, 1), (0, -1))
+
+  private val queenDirections: List[(Int, Int)] =
+    bishopDirections ++ rookDirections
 
   private def applyMoveToBoard(move: Move): Either[String, Board] =
     val p = board.pieceAt(move.from).get
