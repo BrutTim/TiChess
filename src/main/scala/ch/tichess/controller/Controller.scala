@@ -319,7 +319,7 @@ object Controller:
             case Some(botColor) if state.game.sideToMove != botColor =>
               Future.successful(UpdateResult(state, Some("Bot ist nicht am Zug."), quit = false))
             case Some(_) =>
-              val bot = new ch.tichess.bot.AlphaBetaBot(5000L, Some(openingDb))
+              val bot = new ch.tichess.bot.AlphaBetaBot(10000L, Some(openingDb))
               bot.chooseMove(state).flatMap {
                 case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
                 case Right(mv) => applyChallengeMove(state, mv, modelService)

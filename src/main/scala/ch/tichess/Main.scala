@@ -28,7 +28,7 @@ object Main:
     implicit val ec: ExecutionContext = system.executionContext
 
     val client = new ch.tichess.bot.lichess.LichessClient(token)
-    val bot = new ch.tichess.bot.AlphaBetaBot(5000L, Some(Controller.openingDb))
+    val bot = new ch.tichess.bot.AlphaBetaBot(10000L, Some(Controller.openingDb))
     
     val runner = new ch.tichess.bot.lichess.LichessBotRunner(client, bot)
     runner.start()

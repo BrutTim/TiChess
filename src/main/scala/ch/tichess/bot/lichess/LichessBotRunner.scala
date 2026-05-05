@@ -77,22 +77,22 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
     }
 
   private def syncState(movesUci: String, startGame: Game, gameId: String): AppState =
-    if movesUci.trim.isEmpty then AppState(startGame)
+    if movesUci.trim.isEmpty then AppState(startGame, startGame = startGame, moveHistory = Vector.empty)
     else
       val ucis = movesUci.split("\\s+").filter(_.nonEmpty).toList
-      val finalGame = ucis.foldLeft(startGame) { (game, uci) =>
+      val (finalGame, moves) = ucis.foldLeft((startGame, Vector.empty[Move])) { case ((game, history), uci) =>
         parseUciMove(uci) match
           case Some(mv) =>
             game.applyMove(mv) match
-              case Right(next) => next
+              case Right(next) => (next, history :+ mv)
               case Left(err) =>
                 println(s"Game $gameId: Could not apply Lichess move $uci on local board: $err")
-                game
+                (game, history)
           case None =>
             println(s"Game $gameId: Could not parse Lichess move $uci.")
-            game
+            (game, history)
       }
-      AppState(finalGame)
+      AppState(finalGame, startGame = startGame, moveHistory = moves)
 
   private def checkTurnAndPlay(gameId: String, state: AppState, botColor: Color, timeMs: Option[Long], incrementMs: Option[Long]): Unit =
     if state.game.isCheckmate || state.game.isDraw then

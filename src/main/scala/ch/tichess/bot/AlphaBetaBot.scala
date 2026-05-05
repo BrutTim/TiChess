@@ -12,7 +12,7 @@ import ch.tichess.model.Fen
  *
  * Note: this is intended as an MVP and therefore keeps the evaluation cheap.
  */
-class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase] = None) extends ChessBot:
+class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase] = None) extends ChessBot:
   override val name: String = s"AlphaBetaBot(time=${thinkTimeMs}ms)"
 
   private class TimeLimitExceededException extends RuntimeException
@@ -81,6 +81,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
     val transpositionTable: mutable.HashMap[Long, TranspositionEntry] = mutable.HashMap.empty
     val killerMoves: mutable.HashMap[Int, List[Move]] = mutable.HashMap.empty
     val historyScores: mutable.HashMap[Move, Int] = mutable.HashMap.empty
+    var rootRepetitionCounts: Map[String, Int] = Map.empty
+    val pathRepetitionCounts: mutable.HashMap[String, Int] = mutable.HashMap.empty
     val nodes = java.util.concurrent.atomic.AtomicLong(0)
     val profiler = SearchProfiler()
 
@@ -93,6 +95,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
     val legal = game.legalMoves
     if legal.isEmpty then Future.successful(Left("No legal moves available."))
     else
+      val legalForDecision = avoidRootThreefold(state, legal)
       val budget = searchBudget(remainingTimeMs, incrementMs)
 
       val normalizedFen = Fen.encodeNormalized(game)
@@ -104,8 +107,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
       dbFuture.flatMap { dbMoves =>
-        val validDbMoves = dbMoves.filter(m => legal.contains(m.move))
-        rootSyzygyMove(game, legal).orElse(syzygyTransitionMove(game, legal)) match
+        val validDbMoves = dbMoves.filter(m => legalForDecision.contains(m.move))
+        rootSyzygyMove(game, legalForDecision).orElse(syzygyTransitionMove(game, legalForDecision)) match
           case Some(tablebaseMove) =>
             Future.successful(Right(tablebaseMove))
           case None if validDbMoves.nonEmpty =>
@@ -113,8 +116,37 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
             val bestDbMove = validDbMoves.maxBy(_.score).move
             Future.successful(Right(bestDbMove))
           case None =>
-            searchMoveAsync(game, legal, budget)
+            searchMoveAsync(game, legalForDecision, budget, repetitionCounts(state.startGame, state.moveHistory))
       }
+
+  private def avoidRootThreefold(state: AppState, legal: List[Move]): List[Move] =
+    if state.moveHistory.isEmpty then legal
+    else
+      val counts = repetitionCounts(state.startGame, state.moveHistory)
+      val repetitionMoves = legal.filter { move =>
+        state.game.applyMove(move).toOption.exists { next =>
+          counts.getOrElse(Fen.encodeNormalized(next), 0) + 1 >= 3
+        }
+      }
+      val alternatives = legal.filterNot(repetitionMoves.toSet)
+      val shouldAvoidDraw = staticEvaluate(state.game) >= -100
+
+      if repetitionMoves.nonEmpty && alternatives.nonEmpty && shouldAvoidDraw then
+        println(s"  draw-avoid | skipping ${repetitionMoves.size} move(s) causing immediate threefold repetition")
+        alternatives
+      else legal
+
+  private def repetitionCounts(startGame: Game, moves: Vector[Move]): Map[String, Int] =
+    var game = startGame
+    val counts = mutable.HashMap[String, Int](Fen.encodeNormalized(game) -> 1)
+    moves.foreach { move =>
+      game.applyMove(move).toOption.foreach { next =>
+        game = next
+        val key = Fen.encodeNormalized(game)
+        counts.update(key, counts.getOrElse(key, 0) + 1)
+      }
+    }
+    counts.toMap
 
   private def rootSyzygyMove(game: Game, legal: List[Move]): Option[Move] =
     syzygyTablebase.flatMap(_.probe(game)).filter(result => legal.contains(result.bestMove)).map { result =>
@@ -161,7 +193,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
           Math.max(300L, Math.min(raw, normalCap).min(Math.max(300L, ms - panicReserve)))
       case None => thinkTimeMs
 
-  private def searchMoveAsync(game: Game, legal: List[Move], budget: Long): Future[Either[String, Move]] =
+  private def searchMoveAsync(game: Game, legal: List[Move], budget: Long, repetitions: Map[String, Int]): Future[Either[String, Move]] =
     implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
     // Execute CPU-heavy search in a global thread pool
@@ -173,6 +205,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       var currentDepth = 1
       context.nodes.set(0) // Reset node counter for this specific move display
       context.profiler.reset()
+      context.rootRepetitionCounts = repetitions
+      context.pathRepetitionCounts.clear()
 
       try
         // Iterative Deepening
@@ -247,11 +281,11 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       val mv = ordered(i)
       val next = applyMoveProfiled(game, mv, context)
       val score =
-        if i == 0 then -negamax(next, depth - 1, -beta, -alpha, deadline, ply = 1, context)
+        if i == 0 then -withRepetition(next, context)(negamax(next, depth - 1, -beta, -alpha, deadline, ply = 1, context))
         else
-          var candidate = -negamax(next, depth - 1, -alpha - 1, -alpha, deadline, ply = 1, context)
+          var candidate = -withRepetition(next, context)(negamax(next, depth - 1, -alpha - 1, -alpha, deadline, ply = 1, context))
           if candidate > alpha && candidate < beta then
-            candidate = -negamax(next, depth - 1, -beta, -alpha, deadline, ply = 1, context)
+            candidate = -withRepetition(next, context)(negamax(next, depth - 1, -beta, -alpha, deadline, ply = 1, context))
           candidate
 
       if score > bestScore then
@@ -268,9 +302,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
     context.nodes.incrementAndGet()
     if System.currentTimeMillis() > deadline then throw new TimeLimitExceededException()
 
-    // Contempt for draws: penalize them so the bot tries to win
-    val contemptValue = -50
-    if game.halfMoveClock >= 100 then return contemptValue
+    if isRepetitionDraw(game, context) || game.halfMoveClock >= 100 then return drawScore
 
     if depth <= 0 then
       if isInCheckProfiled(game, context) then
@@ -293,12 +325,13 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
       val legal = legalMovesProfiled(game, context)
       if legal.isEmpty then
         if isInCheckProfiled(game, context) then -mateScore + ply
-        else contemptValue // Stalemate / Draw penalty
+        else drawScore
       else
         val alphaOrig = alpha0
         var alpha = alpha0
         var best = -mateScore * 2
         var bestMove: Option[Move] = None
+        val inCheck = isInCheckProfiled(game, context)
 
         val ttBestMove = transpositionLookup(context, positionKey).flatMap(_.bestMove)
         val ordered = orderedMoves(game, legal, ttBestMove, ply, context)
@@ -308,11 +341,14 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
           val mv = ordered(i)
           val next = applyMoveProfiled(game, mv, context)
           val score =
-            if i == 0 then -negamax(next, depth - 1, -beta0, -alpha, deadline, ply + 1, context)
+            if i == 0 then -withRepetition(next, context)(negamax(next, depth - 1, -beta0, -alpha, deadline, ply + 1, context))
             else
-              var candidate = -negamax(next, depth - 1, -alpha - 1, -alpha, deadline, ply + 1, context)
+              val reduction = lateMoveReduction(game, mv, depth, i, inCheck, ttBestMove)
+              var candidate = -withRepetition(next, context)(negamax(next, depth - 1 - reduction, -alpha - 1, -alpha, deadline, ply + 1, context))
+              if reduction > 0 && candidate > alpha then
+                candidate = -withRepetition(next, context)(negamax(next, depth - 1, -alpha - 1, -alpha, deadline, ply + 1, context))
               if candidate > alpha && candidate < beta0 then
-                candidate = -negamax(next, depth - 1, -beta0, -alpha, deadline, ply + 1, context)
+                candidate = -withRepetition(next, context)(negamax(next, depth - 1, -beta0, -alpha, deadline, ply + 1, context))
               candidate
           if score > best then
             best = score
@@ -324,6 +360,23 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
         storeTransposition(context, positionKey, depth, best, boundFor(best, alphaOrig, beta0), bestMove, ply)
         best
 
+  private def lateMoveReduction(
+      game: Game,
+      move: Move,
+      depth: Int,
+      moveIndex: Int,
+      inCheck: Boolean,
+      ttBestMove: Option[Move]
+  ): Int =
+    if depth < 3 then 0
+    else if moveIndex < 4 then 0
+    else if inCheck then 0
+    else if ttBestMove.contains(move) then 0
+    else if captureUrgency(game, move) > 0 then 0
+    else if move.promotion.nonEmpty then 0
+    else if depth >= 5 && moveIndex >= 8 then 2
+    else 1
+
   private def searchCheckEvasions(game: Game, legal: List[Move], alpha0: Int, beta: Int, deadline: Long, ply: Int, context: SearchContext): Int =
     var alpha = alpha0
     var best = -mateScore * 2
@@ -332,7 +385,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
     while i < ordered.size && alpha < beta do
       if System.currentTimeMillis() > deadline then throw new TimeLimitExceededException()
       val next = applyMoveProfiled(game, ordered(i), context)
-      val score = -quiescence(next, -beta, -alpha, deadline, ply + 1, context)
+      val score = -withRepetition(next, context)(quiescence(next, -beta, -alpha, deadline, ply + 1, context))
       best = Math.max(best, score)
       alpha = Math.max(alpha, best)
       i += 1
@@ -341,6 +394,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
   private def quiescence(game: Game, alpha0: Int, beta: Int, deadline: Long, ply: Int, context: SearchContext): Int =
     context.nodes.incrementAndGet()
     if System.currentTimeMillis() > deadline then throw new TimeLimitExceededException()
+    if isRepetitionDraw(game, context) || game.halfMoveClock >= 100 then return drawScore
 
     var alpha = alpha0
     val standPat = staticEvaluateProfiled(game, context)
@@ -353,7 +407,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
     while i < ordered.size && alpha < beta do
       val mv = ordered(i)
       val next = applyMoveProfiled(game, mv, context)
-      val score = -quiescence(next, -beta, -alpha, deadline, ply + 1, context)
+      val score = -withRepetition(next, context)(quiescence(next, -beta, -alpha, deadline, ply + 1, context))
       if score > alpha then alpha = score
       i += 1
 
@@ -370,6 +424,20 @@ class AlphaBetaBot(thinkTimeMs: Long = 5000L, openingDb: Option[OpeningDatabase]
 
   private val mateScore: Int = 100000
   private val mateScoreThreshold: Int = mateScore - 1000
+  private val drawScore: Int = 0
+
+  private def isRepetitionDraw(game: Game, context: SearchContext): Boolean =
+    val key = Fen.encodeNormalized(game)
+    context.rootRepetitionCounts.getOrElse(key, 0) + context.pathRepetitionCounts.getOrElse(key, 0) >= 3
+
+  private def withRepetition(game: Game, context: SearchContext)(score: => Int): Int =
+    val key = Fen.encodeNormalized(game)
+    context.pathRepetitionCounts.update(key, context.pathRepetitionCounts.getOrElse(key, 0) + 1)
+    try score
+    finally
+      val nextCount = context.pathRepetitionCounts(key) - 1
+      if nextCount == 0 then context.pathRepetitionCounts.remove(key)
+      else context.pathRepetitionCounts.update(key, nextCount)
 
   // ─── PeSTO Evaluation ────────────────────────────────────────────────────
 
