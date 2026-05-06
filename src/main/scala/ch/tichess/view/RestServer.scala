@@ -295,6 +295,11 @@ object RestServer extends JsonSupport:
                 |                    </select>
                 |                </div>
                 |                <button id="btn-start-game" class="action-btn start-btn" type="button" onclick="startTimedGame()">Partie starten</button>
+                |                <div class="action-grid">
+                |                    <button class="action-btn" type="button" onclick="sendCommand('bot off')">Bot aus</button>
+                |                    <button class="action-btn" type="button" onclick="sendCommand('bot black')">Bot Schwarz</button>
+                |                    <button class="action-btn" type="button" onclick="sendCommand('bot white')">Bot Weiß</button>
+                |                </div>
                 |            </div>
                 |        </div>
                 |        <div class="panel-card">
@@ -374,6 +379,9 @@ object RestServer extends JsonSupport:
                 |    let transientStatusText = null;
                 |    let serverStatusText = 'Connecting...';
                 |    let currentSideToMove = 'w';
+                |    let activeBot = null;
+                |    let botInFlight = false;
+                |    let lastBotMoveForFen = null;
                 |    let gameStarted = false;
                 |    let gameTimedOut = false;
                 |    let timeoutLoser = null;
@@ -461,7 +469,6 @@ object RestServer extends JsonSupport:
                 |    }
                 |    async function startTimedGame() {
                 |        if (challengeActive) return;
-                |        await sendCommand('new', { skipFetch: true });
                 |        clockBaseMs = selectedModeMs();
                 |        whiteRemainingMs = clockBaseMs;
                 |        blackRemainingMs = clockBaseMs;
@@ -501,7 +508,7 @@ object RestServer extends JsonSupport:
                 |    }
                 |    function updateInteractionState() {
                 |        const boardEl = document.getElementById('board');
-                |        const locallyBlocked = (!gameStarted && !challengeActive) || gameTimedOut;
+                |        const locallyBlocked = (!gameStarted && !challengeActive) || gameTimedOut || (activeBot && activeBot === currentSideToMove);
                 |        boardEl.classList.toggle('game-over', isGameOver || gameTimedOut);
                 |        boardEl.classList.toggle('locked', locallyBlocked && !isGameOver && !gameTimedOut);
                 |        const startBtn = document.getElementById('btn-start-game');
@@ -529,6 +536,24 @@ object RestServer extends JsonSupport:
                 |            document.getElementById('tab-' + tab).classList.toggle('active', active);
                 |        });
                 |    }
+                |    function maybeAutoBotMove(fen) {
+                |        try {
+                |            if (!activeBot) return;
+                |            if (!gameStarted) return;
+                |            if (challengeActive) return;
+                |            if (isGameOver || gameTimedOut) return;
+                |            if (botInFlight) return;
+                |            if (activeBot !== currentSideToMove) return;
+                |            if (lastBotMoveForFen === fen) return;
+                |
+                |            botInFlight = true;
+                |            lastBotMoveForFen = fen;
+                |            sendCommand('bot move');
+                |        } catch (e) {
+                |            console.error(e);
+                |            botInFlight = false;
+                |        }
+                |    }
                 |    async function fetchGame() {
                 |        try {
                 |            const response = await fetch('/api/view/game'); const data = await response.json();
@@ -536,9 +561,11 @@ object RestServer extends JsonSupport:
                 |            challengeActive = (data.statusText || '').startsWith('Challenge aktiv');
                 |            challengeHintFrom = data.challengeHintFrom || null;
                 |            challengeSideToMove = data.challengeSideToMove || null;
+                |            activeBot = data.activeBot || null;
                 |            serverStatusText = transientStatusText || data.statusText;
                 |            transientStatusText = null;
                 |            currentSideToMove = (data.fen.split(' ')[1] || 'w').trim();
+                |            botInFlight = false; // allow triggering again for the new position
                 |            if (isGameOver) {
                 |                gameStarted = false;
                 |                activeClock = null;
@@ -581,6 +608,7 @@ object RestServer extends JsonSupport:
                 |            }
                 |            parserSelect.value = data.currentParser;
                 |            renderFen(data.fen);
+                |            maybeAutoBotMove(data.fen);
                 |            updateChallengePanel();
                 |            updateClockDisplay();
                 |            updateStatusText();
@@ -763,7 +791,8 @@ object RestServer extends JsonSupport:
                       currentParser = "fastparse",
                       availableParsers = List("fastparse"),
                       challengeHintFrom = None,
-                      challengeSideToMove = None
+                      challengeSideToMove = None,
+                      activeBot = None
                     )
                     )
                 }

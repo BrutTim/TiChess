@@ -64,8 +64,31 @@ class SlickGameDaoSpec extends AsyncWordSpec with Matchers {
 
   "ChallengeSeeds" should {
     "provide a broader built-in Lichess fallback set" in {
-      ChallengeSeeds.defaultLichessPuzzles.size should be >= 8
+      ChallengeSeeds.defaultLichessPuzzles.size should be >= 2000
       ChallengeSeeds.defaultLichessPuzzles.map(_.id).distinct shouldBe ChallengeSeeds.defaultLichessPuzzles.map(_.id)
+    }
+
+    "fall back to bundled rows when no resource stream is available" in {
+      val fallback = ChallengeSeeds.loadDefaultLichessPuzzles(None)
+
+      fallback should have size 12
+      fallback.map(_.id) should contain("00008")
+    }
+  }
+
+  "LichessPuzzleImporter" should {
+    "read CSV resources from input streams" in {
+      val csv =
+        """PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags
+          |stream,4k3/P7/8/8/8/8/8/4K3 w - - 0 1,a7a8q e8f7,1200,80,90,1,promotion,https://lichess.org/test,
+          |""".stripMargin
+      val input = new java.io.ByteArrayInputStream(csv.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+
+      val imported = LichessPuzzleImporter.fromCsvInputStream(input)
+
+      imported should have size 1
+      imported.head.id shouldBe "stream"
+      imported.head.moves shouldBe "e8 f7"
     }
   }
 

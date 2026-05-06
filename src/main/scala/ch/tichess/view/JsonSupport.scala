@@ -24,7 +24,8 @@ final case class StateResponse(
     currentParser: String,
     availableParsers: List[String],
     challengeHintFrom: Option[String],
-    challengeSideToMove: Option[String]
+    challengeSideToMove: Option[String],
+    activeBot: Option[String]
 )
 
 trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
@@ -36,4 +37,4 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
   implicit val challengeRecordFormat: RootJsonFormat[ChallengeRecord] = jsonFormat4(ChallengeRecord.apply)
   implicit val challengeRecordListFormat: RootJsonFormat[List[ChallengeRecord]] = listFormat[ChallengeRecord]
 
-  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat14(StateResponse.apply)
+  implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat15(StateResponse.apply)

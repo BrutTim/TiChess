@@ -1,17 +1,32 @@
 package ch.tichess.controller.persistence
 
-import ch.tichess.model.{Fen, Game, Move, Pos, PromotionRole}
+import ch.tichess.model.{Fen, Move, Pos, PromotionRole}
 
+import java.io.InputStream
 import scala.io.Source
+import scala.util.Using
 
 object LichessPuzzleImporter {
   def fromCsvFile(path: String, limit: Int = 200): Seq[ChallengeRecord] =
-    val source = Source.fromFile(path)
-    try fromCsvRows(source.getLines().drop(1).toSeq, limit)
-    finally source.close()
+    Using.resource(Source.fromFile(path)) { source =>
+      fromCsvLines(source.getLines(), limit, skipHeader = true)
+    }
+
+  def fromCsvInputStream(input: InputStream, limit: Int = 200): Seq[ChallengeRecord] =
+    Using.resource(Source.fromInputStream(input)) { source =>
+      fromCsvLines(source.getLines(), limit, skipHeader = true)
+    }
 
   def fromCsvRows(rows: Seq[String], limit: Int = 200): Seq[ChallengeRecord] =
-    rows.iterator.flatMap(parseRow).take(limit).toSeq
+    fromCsvLines(rows.iterator, limit, skipHeader = false)
+
+  private def fromCsvLines(lines: Iterator[String], limit: Int, skipHeader: Boolean): Seq[ChallengeRecord] =
+    val dataLines =
+      if skipHeader && lines.hasNext then
+        lines.next()
+        lines
+      else lines
+    dataLines.flatMap(parseRow).take(limit).toSeq
 
   private def parseRow(row: String): Option[ChallengeRecord] =
     val columns = row.split(",", -1)

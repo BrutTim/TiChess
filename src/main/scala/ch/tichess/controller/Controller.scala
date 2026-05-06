@@ -2,6 +2,7 @@ package ch.tichess.controller
 
 import ch.tichess.model.*
 import ch.tichess.controller.persistence.ChallengeRecord
+import ch.tichess.bot.AlphaBetaBot
 import ch.tichess.services.ModelService
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -23,6 +24,10 @@ enum Command:
   case DrawDecline
   case Resign
   case NewGame
+  case BotOn
+  case BotOff
+  case BotColor(c: Color)
+  case BotMove
 
 object Command:
   def parse(input: String): Either[String, Command] =
@@ -44,6 +49,11 @@ object Command:
       else if lower.startsWith("challenge load") && lower.length > 14 && lower.charAt(14).isWhitespace then
         Right(Command.LoadChallengeCmd(trimmed.substring(14).trim))
       else if lower == "challenge random" then Right(Command.RandomChallengeCmd)
+      else if lower == "bot on" then Right(Command.BotOn)
+      else if lower == "bot off" then Right(Command.BotOff)
+      else if lower == "bot black" then Right(Command.BotColor(Color.Black))
+      else if lower == "bot white" then Right(Command.BotColor(Color.White))
+      else if lower == "bot move" then Right(Command.BotMove)
       else
         lower match
           case "fen" => Left("Expected a FEN after 'fen'.")
@@ -56,6 +66,7 @@ object Command:
           case "resign" | "aufgeben" => Right(Command.Resign)
           case "new" | "restart" | "neu" => Right(Command.NewGame)
           case "challenge" => Left("Expected a challenge command like: challenge random.")
+          case "bot" => Left("Expected a bot command like: bot move, bot black, bot off.")
           case _ =>
             val parts = trimmed.split("\\s+").toList
             parts match
@@ -70,7 +81,7 @@ object Command:
                   to <- Pos.fromAlgebraic(toStr.toLowerCase)
                   promotion <- PromotionRole.fromPromotionChar(promoStr)
                 yield Command.MoveCmd(Move(from, to, Some(promotion)))
-              case _ => Left("Expected a move like: e2 e4 (or 'help', 'quit', fen, pgn, parser, challenge).")
+              case _ => Left("Expected a move like: e2 e4 (or 'help', 'quit', fen, pgn, parser, challenge, bot).")
 
 final case class ChallengeState(id: String, name: String, remainingMoves: Vector[Move])
 
@@ -83,13 +94,24 @@ final case class AppState(
     resignedBy: Option[Color] = None,
     drawAgreed: Boolean = false,
     challengeMode: Option[ChallengeState] = None,
-    challengeCompleted: Boolean = false
+    challengeCompleted: Boolean = false,
+    activeBot: Option[Color] = None
 )
 
 final case class UpdateResult(state: AppState, message: Option[String], quit: Boolean):
   def game: Game = state.game
 
 object Controller:
+  lazy val openingDb: ch.tichess.bot.PgnOpeningDatabase = {
+    import scala.concurrent.ExecutionContext.Implicits.global
+    val db = new ch.tichess.bot.PgnOpeningDatabase()
+    val loaded = scala.util.Using(scala.io.Source.fromResource("openings.pgn")) { source =>
+      db.loadFromPgnString(source.mkString)
+    }.getOrElse(0)
+    println(s"[OpeningDB] Loaded $loaded games → ${db.positionCount} unique positions.")
+    db
+  }
+
   def initial: Game = Game.initial
   def initialState: AppState = AppState(Game.initial, startGame = Game.initial, moveHistory = Vector.empty, drawOfferedBy = None, resignedBy = None, drawAgreed = false)
 
@@ -205,7 +227,8 @@ object Controller:
       input: String,
       modelService: ModelService,
       challengeLookup: String => Future[Option[ChallengeRecord]] = _ => Future.successful(None),
-      randomChallenge: () => Future[Option[ChallengeRecord]] = () => Future.successful(None)
+      randomChallenge: () => Future[Option[ChallengeRecord]] = () => Future.successful(None),
+      botFactory: () => ch.tichess.bot.ChessBot = () => new ch.tichess.bot.AlphaBetaBot(10000L, Some(openingDb))
   )(implicit ec: ExecutionContext): Future[UpdateResult] =
     Command.parse(input) match
       case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
@@ -226,6 +249,7 @@ object Controller:
                                       "- Remis ablehnen: `decline`",
                                       "- Aufgeben: `resign`",
                                       "- Neues Spiel: `new`",
+                                      "- Bot steuern: `bot on`, `bot white`, `bot black`, `bot off`, `bot move`",
                                       "- Zufalls-Challenge starten: `challenge random`",
                                       "- Beispiel FEN: `fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w`"
                                     ).mkString("\n")), quit = false))
@@ -263,10 +287,44 @@ object Controller:
         val nextState = state.copy(resignedBy = Some(loser))
         Future.successful(UpdateResult(nextState, Some(s"${colorLabel(loser)} gibt auf. ${colorLabel(winner)} gewinnt!"), quit = true))
       case Right(Command.NewGame) =>
-        val nextState = initialState
+        val nextState = state.copy(
+          game = Game.initial,
+          startGame = Game.initial,
+          moveHistory = Vector.empty,
+          drawOfferedBy = None,
+          resignedBy = None,
+          drawAgreed = false,
+          challengeMode = None,
+          challengeCompleted = false
+        )
         Future.successful(UpdateResult(nextState, Some("Neues Spiel gestartet."), quit = false))
       case Right(Command.Quit) =>
         Future.successful(UpdateResult(state, Some("Bye."), quit = true))
+      case Right(Command.BotOn) =>
+        Future.successful(UpdateResult(state.copy(activeBot = Some(Color.Black)), Some("Bot aktiv (Black)."), quit = false))
+      case Right(Command.BotOff) =>
+        Future.successful(UpdateResult(state.copy(activeBot = None), Some("Bot deaktiviert."), quit = false))
+      case Right(Command.BotColor(c)) =>
+        Future.successful(UpdateResult(state.copy(activeBot = Some(c)), Some(s"Bot aktiv (${colorLabel(c)})."), quit = false))
+      case Right(Command.BotMove) =>
+        if state.drawOfferedBy.isDefined then
+          Future.successful(
+            UpdateResult(state, Some("Remis-Angebot ausstehend. Bitte 'accept' oder 'decline' eingeben."), quit = false)
+          )
+        else
+          state.activeBot match
+            case None =>
+              Future.successful(UpdateResult(state, Some("Bot ist deaktiviert."), quit = false))
+            case Some(botColor) if state.game.isCheckmate || state.game.isDraw || state.drawAgreed || state.resignedBy.isDefined =>
+              Future.successful(UpdateResult(state, Some("Spiel ist beendet."), quit = false))
+            case Some(botColor) if state.game.sideToMove != botColor =>
+              Future.successful(UpdateResult(state, Some("Bot ist nicht am Zug."), quit = false))
+            case Some(_) =>
+              val bot = botFactory()
+              bot.chooseMove(state).flatMap {
+                case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))
+                case Right(mv) => applyChallengeMove(state, mv, modelService)
+              }
       case Right(Command.MoveCmd(_)) if state.drawOfferedBy.isDefined =>
         Future.successful(UpdateResult(state, Some("Remis-Angebot ausstehend. Bitte 'accept' oder 'decline' eingeben."), quit = false))
       case Right(Command.MoveCmd(mv)) =>

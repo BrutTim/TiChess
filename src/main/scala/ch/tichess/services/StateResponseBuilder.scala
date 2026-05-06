@@ -5,6 +5,14 @@ import ch.tichess.model.{NotationParsers, PieceType, Pos}
 import ch.tichess.view.{GuiViewAdapter, GuiViewState, StateResponse}
 
 object StateResponseBuilder:
+  private[services] def captureChar(kind: PieceType): String = kind match
+    case PieceType.Pawn   => "♟"
+    case PieceType.Knight => "♞"
+    case PieceType.Bishop => "♝"
+    case PieceType.Rook   => "♜"
+    case PieceType.Queen  => "♛"
+    case PieceType.King   => "♚"
+
   def fromAppState(appState: AppState): StateResponse =
     val guiState = GuiViewState(
       appState.game,
@@ -18,16 +26,8 @@ object StateResponseBuilder:
 
     val advantage = guiState.materialAdvantage
 
-    def capChar(kind: PieceType): String = kind match
-      case PieceType.Pawn   => "♟"
-      case PieceType.Knight => "♞"
-      case PieceType.Bishop => "♝"
-      case PieceType.Rook   => "♜"
-      case PieceType.Queen  => "♛"
-      case PieceType.King   => "♚"
-
     def capDisplay(pieces: List[PieceType], showAdvantage: Boolean): String =
-      val symbols = pieces.map(capChar).mkString
+      val symbols = pieces.map(captureChar).mkString
       val advantageText = if showAdvantage then s" +${Math.abs(advantage)}" else ""
       if symbols.isEmpty && !showAdvantage then "" else s"$symbols$advantageText"
 
@@ -67,5 +67,9 @@ object StateResponseBuilder:
         appState.game.sideToMove match
           case ch.tichess.model.Color.White => "Weiss"
           case ch.tichess.model.Color.Black => "Schwarz"
-      )
+      ),
+      activeBot = appState.activeBot.map {
+        case ch.tichess.model.Color.White => "w"
+        case ch.tichess.model.Color.Black => "b"
+      }
     )

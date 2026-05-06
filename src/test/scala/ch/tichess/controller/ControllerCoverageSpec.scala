@@ -1,6 +1,7 @@
 package ch.tichess.controller
 
 import ch.tichess.controller.persistence.ChallengeRecord
+import ch.tichess.bot.ChessBot
 import ch.tichess.model.*
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -92,6 +93,56 @@ final class ControllerCoverageSpec extends AnyFunSuite:
     assert(helped.message.exists(_.contains("Zug eingeben")))
     assert(defaultLoad.message.contains("Challenge nicht gefunden: absent"))
     assert(defaultRandom.message.contains("Keine Challenge verfuegbar."))
+  }
+
+  test("Controller.update covers remaining bot guard branches") {
+    val initial = Controller.initialState
+
+    val botOn = Controller.update(initial, "bot on")
+    assert(botOn.state.activeBot.contains(Color.Black))
+    assert(botOn.message.contains("Bot aktiv (Black)."))
+
+    val botOff = Controller.update(botOn.state, "bot off")
+    assert(botOff.state.activeBot.isEmpty)
+    assert(botOff.message.contains("Bot deaktiviert."))
+
+    val disabledMove = Controller.update(initial, "bot move")
+    assert(disabledMove.state == initial)
+    assert(disabledMove.message.contains("Bot ist deaktiviert."))
+
+    val drawPendingState = initial.copy(activeBot = Some(Color.White), drawOfferedBy = Some(Color.Black))
+    val drawPending = Controller.update(drawPendingState, "bot move")
+    assert(drawPending.state == drawPendingState)
+    assert(drawPending.message.exists(_.contains("Remis-Angebot ausstehend")))
+
+    val finishedState = initial.copy(activeBot = Some(Color.White), drawAgreed = true)
+    val finished = Controller.update(finishedState, "bot move")
+    assert(finished.state == finishedState)
+    assert(finished.message.contains("Spiel ist beendet."))
+  }
+
+  test("Controller.updateAsync reports bot move selection errors") {
+    val failingBot = new ChessBot:
+      override val name: String = "failing-test-bot"
+      override def chooseMove(
+          state: AppState,
+          remainingTimeMs: Option[Long],
+          incrementMs: Option[Long]
+      ): Future[Either[String, Move]] =
+        Future.successful(Left("no move today"))
+
+    val result = Await.result(
+      Controller.updateAsync(
+        Controller.initialState.copy(activeBot = Some(Color.White)),
+        "bot move",
+        new ch.tichess.services.LocalModelService(),
+        botFactory = () => failingBot
+      ),
+      5.seconds
+    )
+
+    assert(result.state == Controller.initialState.copy(activeBot = Some(Color.White)))
+    assert(result.message.contains("no move today"))
   }
 
   test("Controller covers challenge loading errors and empty solved state") {

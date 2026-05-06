@@ -181,6 +181,39 @@ final class ModelCoverageSpec extends AnyFunSuite:
     assert(enPassantApplied.board.pieceAt(Pos(3, 4)).isEmpty)
   }
 
+  test("Game.legalMoves exposes pseudo-generated special moves safely") {
+    assert(Game.initial.legalMoves.size == 20)
+
+    val castlingGame = Game(
+      Board.empty.copy(
+        pieces = Map(
+          Pos(4, 0) -> Piece(Color.White, PieceType.King),
+          Pos(0, 0) -> Piece(Color.White, PieceType.Rook),
+          Pos(7, 0) -> Piece(Color.White, PieceType.Rook),
+          Pos(4, 7) -> Piece(Color.Black, PieceType.King)
+        )
+      ),
+      Color.White
+    )
+    val castlingMoves = castlingGame.legalMoves.toSet
+    assert(castlingMoves.contains(Move(Pos(4, 0), Pos(6, 0))))
+    assert(castlingMoves.contains(Move(Pos(4, 0), Pos(2, 0))))
+
+    val enPassantGame = Game(
+      Board.empty.copy(
+        pieces = Map(
+          Pos(0, 0) -> Piece(Color.White, PieceType.King),
+          Pos(4, 4) -> Piece(Color.White, PieceType.Pawn),
+          Pos(3, 4) -> Piece(Color.Black, PieceType.Pawn),
+          Pos(7, 7) -> Piece(Color.Black, PieceType.King)
+        )
+      ),
+      Color.White,
+      enPassantTarget = Some(Pos(3, 5))
+    )
+    assert(enPassantGame.legalMoves.contains(Move(Pos(4, 4), Pos(3, 5))))
+  }
+
   test("Fen parsers cover optional castling, en-passant, halfmove, and fullmove fields") {
     val castlingOnly = "4k3/8/8/8/8/8/8/4K3 w KQ"
     val withEnPassant = "4k3/8/8/8/8/8/8/4K3 w KQ e3"
