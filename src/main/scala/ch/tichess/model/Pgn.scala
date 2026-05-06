@@ -36,8 +36,15 @@ private[ch] object PgnSupport:
       if startGame == Game.initial then Vector.empty
       else Vector("SetUp" -> "1", "FEN" -> Fen.encode(startGame))
 
-    val tagBlock = (baseTags ++ setupTags).map { (key, value) => s"""[$key "${escape(value)}"]""" }.mkString("\n")
-    s"$tagBlock\n\n${renderMoves(moves, effectiveResult)}"
+    val allTags = baseTags ++ setupTags
+    val sb = new java.lang.StringBuilder()
+    var i = 0
+    while i < allTags.length do
+      val (key, value) = allTags(i)
+      sb.append("[").append(key).append(" \"").append(escape(value)).append("\"]\n")
+      i += 1
+    sb.append("\n").append(renderMoves(moves, effectiveResult))
+    sb.toString
 
   def buildImportedPgn(raw: RawPgn, fenParser: FenParser): Either[String, ImportedPgn] =
     for
@@ -121,14 +128,20 @@ private[ch] object PgnSupport:
       case Some(value) => PromotionRole.fromPromotionChar(value).map(Some(_))
 
   private def renderMoves(moves: Vector[Move], result: String): String =
-    val body =
-      moves.grouped(2).zipWithIndex.map { case (pair, idx) =>
-        val white = renderMove(pair.head)
-        val black = pair.lift(1).map(renderMove)
-        s"${idx + 1}. " + (white +: black.toList).mkString(" ")
-      }.mkString(" ")
-
-    if body.isEmpty then result else s"$body $result"
+    if moves.isEmpty then return result
+    val sb = new java.lang.StringBuilder()
+    var i = 0
+    var moveNum = 1
+    val len = moves.length
+    while i < len do
+      if i > 0 then sb.append(" ")
+      sb.append(moveNum).append(". ").append(renderMove(moves(i)))
+      if i + 1 < len then
+        sb.append(" ").append(renderMove(moves(i + 1)))
+      i += 2
+      moveNum += 1
+    sb.append(" ").append(result)
+    sb.toString
 
   private def renderMove(move: Move): String =
     val promotion = move.promotion.map {

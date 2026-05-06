@@ -86,14 +86,27 @@ object SyzygyTablebase:
   private val localDefaultPath = "src/main/resources/3-4-5_pieces_Syzygy/3-4-5"
 
   def fromEnv(): Option[SyzygyTablebase] =
+    fromConfiguredPath(
+      sys.env.get("SYZYGY_PATH"),
+      localDefaultAvailable = File(localDefaultPath).isDirectory,
+      sys.env.get("TICHESS_PYTHON")
+    )
+
+  private[bot] def fromConfiguredPath(
+      configuredSyzygyPath: Option[String],
+      localDefaultAvailable: Boolean,
+      configuredPython: Option[String]
+  ): Option[SyzygyTablebase] =
     val configuredPath =
-      sys.env.get("SYZYGY_PATH").filter(_.nonEmpty)
-        .orElse(Option.when(File(localDefaultPath).isDirectory)(localDefaultPath))
+      configuredSyzygyPath.filter(_.nonEmpty)
+        .orElse(Option.when(localDefaultAvailable)(localDefaultPath))
 
     configuredPath.map { path =>
-      SyzygyTablebase(path, sys.env.getOrElse("TICHESS_PYTHON", defaultPythonCommand))
+      SyzygyTablebase(path, configuredPython.getOrElse(defaultPythonCommand))
     }
 
   private def defaultPythonCommand: String =
-    val venvPython = File("venv/bin/python")
+    defaultPythonCommandFor(File("venv/bin/python"))
+
+  private[bot] def defaultPythonCommandFor(venvPython: File): String =
     if venvPython.isFile then venvPython.getPath else "python3"

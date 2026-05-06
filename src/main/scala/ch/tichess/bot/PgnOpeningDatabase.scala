@@ -61,11 +61,10 @@ class PgnOpeningDatabase(implicit ec: ExecutionContext) extends OpeningDatabase:
             // Record synchronously for the initial load
             val stateDb = db.getOrElse(fen, Map.empty)
             val stats = stateDb.getOrElse(move, OpeningMoveStats(move, 0, 0, 0, 0))
-            val newStats = playerResult match
-              case 1  => stats.copy(played = stats.played + 1, wins = stats.wins + 1)
-              case 0  => stats.copy(played = stats.played + 1, draws = stats.draws + 1)
-              case -1 => stats.copy(played = stats.played + 1, losses = stats.losses + 1)
-              case _  => stats.copy(played = stats.played + 1)
+            val newStats =
+              if playerResult > 0 then stats.copy(played = stats.played + 1, wins = stats.wins + 1)
+              else if playerResult < 0 then stats.copy(played = stats.played + 1, losses = stats.losses + 1)
+              else stats.copy(played = stats.played + 1, draws = stats.draws + 1)
             
             db = db.updated(fen, stateDb.updated(move, newStats))
 

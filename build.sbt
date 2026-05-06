@@ -1,7 +1,7 @@
 ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / organization := "ch.tichess"
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / coverageExcludedFiles := ".*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*services/.*|.*MongoGameDao.*|.*MongoChallengeDao.*"
+ThisBuild / coverageExcludedFiles := ".*Main.*|.*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*ModelServer.*|.*ControllerServer.*|.*HttpModelService.*|.*ControllerHttpClient.*|.*ServiceConfig.*|.*bot/AlphaBetaBot.*|.*bot/lichess/.*|.*MongoGameDao.*|.*MongoChallengeDao.*"
 
 lazy val javaFxVersion = "21.0.2"
 lazy val osName = sys.props("os.name").toLowerCase
@@ -30,6 +30,7 @@ lazy val javaFxDependencies =
   else Seq.empty
 
 lazy val root = (project in file("."))
+  .enablePlugins(JmhPlugin, GatlingPlugin)
   .settings(
     name := "TiChess",
     libraryDependencies ++= Seq(
@@ -50,7 +51,11 @@ lazy val root = (project in file("."))
       "com.h2database" % "h2" % "2.3.232" % Test,
       "org.slf4j" % "slf4j-nop" % "2.0.16",
       ("org.mongodb.scala" %% "mongo-scala-driver" % "5.2.0").cross(CrossVersion.for3Use2_13),
-      "org.scalatestplus" %% "mockito-4-11" % "3.2.18.0" % Test
+      "org.scalatestplus" %% "mockito-4-11" % "3.2.18.0" % Test,
+      "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.11.5" % Test excludeAll(ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(organization = "org.scala-lang.modules")),
+      "io.gatling" % "gatling-test-framework" % "3.11.5" % Test excludeAll(ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(organization = "org.scala-lang.modules"))
     ) ++ javaFxDependencies,
-    Test / fork := true
+    Test / fork := true,
+    Test / parallelExecution := false,
+    Test / test := (Test / test).dependsOn(Compile / copyResources).value
   )
