@@ -38,6 +38,7 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
     var currentState = AppState(startGame)
     var whiteIncrementMs: Option[Long] = None
     var blackIncrementMs: Option[Long] = None
+    var lastPonderFen: Option[String] = None
 
     client.streamGameEvents(gameId).runWith(Sink.foreach { event =>
       event.`type` match
@@ -48,10 +49,10 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
             blackIncrementMs = st.binc.orElse(blackIncrementMs)
             val increment = if botColor == Color.White then whiteIncrementMs else blackIncrementMs
             startGame = parseInitialFen(event.initialFen).getOrElse(Game.initial)
-            val fenInfo = event.initialFen.map(_ => ", custom initial FEN").getOrElse("")
+            val fenInfo = event.initialFen.filterNot(isStartPosition).map(_ => ", custom initial FEN").getOrElse("")
             println(s"Game $gameId: full state received (${st.moves.split("\\s+").count(_.nonEmpty)} moves, status ${st.status}$fenInfo).")
             currentState = syncState(st.moves, startGame, gameId)
-            checkTurnAndPlay(gameId, currentState, botColor, time, increment)
+            checkTurnAndPlay(gameId, currentState, botColor, time, increment, () => lastPonderFen, fen => lastPonderFen = fen)
           }
         case "gameState" =>
           val time = if botColor == Color.White then event.wtime else event.btime
@@ -63,18 +64,22 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
           val moves = event.moves.getOrElse("")
           println(s"Game $gameId: state update (${moves.split("\\s+").count(_.nonEmpty)} moves, status ${event.status.getOrElse("?")}).")
           currentState = syncState(moves, startGame, gameId)
-          checkTurnAndPlay(gameId, currentState, botColor, time, increment)
+          checkTurnAndPlay(gameId, currentState, botColor, time, increment, () => lastPonderFen, fen => lastPonderFen = fen)
         case _ => // chatLine etc.
     }).failed.foreach(e => println(s"Game loop $gameId failed: ${e.getMessage}"))
 
   private def parseInitialFen(initialFen: Option[String]): Option[Game] =
     initialFen.flatMap { fen =>
-      Fen.parse(fen) match
+      if isStartPosition(fen) then Some(Game.initial)
+      else Fen.parse(fen) match
         case Right(game) => Some(game)
         case Left(err) =>
           println(s"Could not parse Lichess initialFen '$fen': $err")
           None
     }
+
+  private def isStartPosition(fen: String): Boolean =
+    fen.trim == "startpos"
 
   private def syncState(movesUci: String, startGame: Game, gameId: String): AppState =
     if movesUci.trim.isEmpty then AppState(startGame, startGame = startGame, moveHistory = Vector.empty)
@@ -94,10 +99,19 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
       }
       AppState(finalGame, startGame = startGame, moveHistory = moves)
 
-  private def checkTurnAndPlay(gameId: String, state: AppState, botColor: Color, timeMs: Option[Long], incrementMs: Option[Long]): Unit =
+  private def checkTurnAndPlay(
+      gameId: String,
+      state: AppState,
+      botColor: Color,
+      timeMs: Option[Long],
+      incrementMs: Option[Long],
+      lastPonderFen: () => Option[String],
+      setLastPonderFen: Option[String] => Unit
+  ): Unit =
     if state.game.isCheckmate || state.game.isDraw then
       println(s"Game $gameId is over.")
     else if state.game.sideToMove == botColor then
+      setLastPonderFen(None)
       val incrementInfo = incrementMs.map(ms => s", +${ms / 1000.0}s").getOrElse("")
       val timeInfo = timeMs.map(ms => s" (${ms / 1000}s left$incrementInfo)").getOrElse("")
       println(s"Game $gameId: Bot is thinking$timeInfo...")
@@ -112,6 +126,29 @@ class LichessBotRunner(client: LichessClient, bot: ChessBot)(implicit system: Ac
       }.failed.foreach(e => println(s"Game $gameId: Error sending move: ${e.getMessage}"))
     else
       println(s"Game $gameId: Waiting for ${state.game.sideToMove}. Bot is $botColor.")
+      startPonderIfUseful(gameId, state, timeMs, lastPonderFen, setLastPonderFen)
+
+  private def startPonderIfUseful(
+      gameId: String,
+      state: AppState,
+      timeMs: Option[Long],
+      lastPonderFen: () => Option[String],
+      setLastPonderFen: Option[String] => Unit
+  ): Unit =
+    val fen = Fen.encodeNormalized(state.game)
+    val budget = ponderBudgetMs(timeMs)
+    if budget > 0L && lastPonderFen().forall(_ != fen) then
+      setLastPonderFen(Some(fen))
+      println(s"Game $gameId: Ponder warmup for up to ${budget}ms.")
+      bot.ponder(state, budget).failed.foreach(e => println(s"Game $gameId: Ponder failed: ${e.getMessage}"))
+
+  private def ponderBudgetMs(timeMs: Option[Long]): Long =
+    timeMs match
+      case Some(ms) if ms >= 24L * 60L * 60L * 1000L => 3000L
+      case Some(ms) =>
+        val budget = ms / 20L
+        if budget < 300L then 0L else Math.min(5000L, budget)
+      case None => 3000L
 
   private def parseUciMove(uci: String): Option[Move] =
     if uci.length != 4 && uci.length != 5 then None

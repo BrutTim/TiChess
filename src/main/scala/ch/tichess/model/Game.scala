@@ -13,9 +13,8 @@ final case class Game(
 
   def legalMoves: List[Move] =
     val candidates =
-      board.allPieces.toList.flatMap {
-        case (from, piece) if piece.color == sideToMove => pseudoMoves(from, piece)
-        case _ => Nil
+      board.bitboards.pieceList(sideToMove).flatMap {
+        case (from, piece) => pseudoMoves(from, piece)
       }
 
     candidates.flatMap { move =>
@@ -154,7 +153,7 @@ final case class Game(
       baseBoard <- board.movePiece(move)
     yield
       val epBoard = if p.kind == PieceType.Pawn && enPassantTarget.contains(move.to) then
-        baseBoard.copy(pieces = baseBoard.pieces - Pos(move.to.file, move.from.rank))
+        baseBoard.removeAt(Pos(move.to.file, move.from.rank))
       else baseBoard
 
       val castlingBoard = if p.kind == PieceType.King && Math.abs(move.to.file - move.from.file) == 2 then
@@ -177,7 +176,7 @@ final case class Game(
     nextBoard.pieceAt(move.to) match
       case Some(Piece(color, PieceType.Pawn)) if promotionRank(color, move.to.rank) =>
         val promotedKind = move.promotion.map(_.toPieceType).getOrElse(PieceType.Pawn)
-        nextBoard.copy(pieces = nextBoard.pieces.updated(move.to, Piece(color, promotedKind)))
+        nextBoard.setAt(move.to, Piece(color, promotedKind))
       case _ =>
         nextBoard
 

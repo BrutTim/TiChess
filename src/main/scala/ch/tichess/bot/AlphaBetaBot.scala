@@ -1,10 +1,11 @@
 package ch.tichess.bot
 
 import ch.tichess.controller.AppState
-import ch.tichess.model.{Board, Color, Game, Move, Piece, PieceType, Pos}
+import ch.tichess.model.{BitboardAttacks, Bitboards, Board, Color, Game, Move, Piece, PieceType, Pos}
 
 import scala.concurrent.Future
 import scala.collection.mutable
+import java.util.concurrent.atomic.AtomicBoolean
 import ch.tichess.model.Fen
 
 /**
@@ -37,6 +38,28 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     var hashCalls: Long = 0L
     var ttNanos: Long = 0L
     var ttCalls: Long = 0L
+    var nullMoveAttempts: Long = 0L
+    var nullMoveCutoffs: Long = 0L
+    var evalContextNanos: Long = 0L
+    var evalContextCalls: Long = 0L
+    var evalMaterialNanos: Long = 0L
+    var evalMaterialCalls: Long = 0L
+    var evalPawnNanos: Long = 0L
+    var evalPawnCalls: Long = 0L
+    var evalKingNanos: Long = 0L
+    var evalKingCalls: Long = 0L
+    var evalActivityNanos: Long = 0L
+    var evalActivityCalls: Long = 0L
+    var evalQueenNanos: Long = 0L
+    var evalQueenCalls: Long = 0L
+    var evalMobilityNanos: Long = 0L
+    var evalMobilityCalls: Long = 0L
+    var evalHangingNanos: Long = 0L
+    var evalHangingCalls: Long = 0L
+    var evalAttackNanos: Long = 0L
+    var evalAttackCalls: Long = 0L
+    var evalClearPathNanos: Long = 0L
+    var evalClearPathCalls: Long = 0L
 
     def reset(): Unit =
       legalNanos = 0L
@@ -53,6 +76,28 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       hashCalls = 0L
       ttNanos = 0L
       ttCalls = 0L
+      nullMoveAttempts = 0L
+      nullMoveCutoffs = 0L
+      evalContextNanos = 0L
+      evalContextCalls = 0L
+      evalMaterialNanos = 0L
+      evalMaterialCalls = 0L
+      evalPawnNanos = 0L
+      evalPawnCalls = 0L
+      evalKingNanos = 0L
+      evalKingCalls = 0L
+      evalActivityNanos = 0L
+      evalActivityCalls = 0L
+      evalQueenNanos = 0L
+      evalQueenCalls = 0L
+      evalMobilityNanos = 0L
+      evalMobilityCalls = 0L
+      evalHangingNanos = 0L
+      evalHangingCalls = 0L
+      evalAttackNanos = 0L
+      evalAttackCalls = 0L
+      evalClearPathNanos = 0L
+      evalClearPathCalls = 0L
 
     def printSummary(totalNanos: Long, nodes: Long, ttSize: Int): Unit =
       if enabled then
@@ -64,6 +109,59 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
         printLine("order", orderNanos, orderCalls, totalNanos)
         printLine("hash", hashNanos, hashCalls, totalNanos)
         printLine("tt", ttNanos, ttCalls, totalNanos)
+        println(s"    null   attempts $nullMoveAttempts | cutoffs $nullMoveCutoffs")
+        if evaluateCalls > 0 then
+          println("    eval breakdown")
+          printLine("      ctx", evalContextNanos, evalContextCalls, evaluateNanos)
+          printLine("      mat", evalMaterialNanos, evalMaterialCalls, evaluateNanos)
+          printLine("      pawn", evalPawnNanos, evalPawnCalls, evaluateNanos)
+          printLine("      king", evalKingNanos, evalKingCalls, evaluateNanos)
+          printLine("      act", evalActivityNanos, evalActivityCalls, evaluateNanos)
+          printLine("      queen", evalQueenNanos, evalQueenCalls, evaluateNanos)
+          printLine("      mob", evalMobilityNanos, evalMobilityCalls, evaluateNanos)
+          printLine("      hang", evalHangingNanos, evalHangingCalls, evaluateNanos)
+          printLine("      attack", evalAttackNanos, evalAttackCalls, evaluateNanos)
+          printLine("      path", evalClearPathNanos, evalClearPathCalls, evaluateNanos)
+
+    def recordEvalContext(nanos: Long): Unit =
+      evalContextNanos += nanos
+      evalContextCalls += 1
+
+    def recordEvalMaterial(nanos: Long): Unit =
+      evalMaterialNanos += nanos
+      evalMaterialCalls += 1
+
+    def recordEvalPawn(nanos: Long): Unit =
+      evalPawnNanos += nanos
+      evalPawnCalls += 1
+
+    def recordEvalKing(nanos: Long): Unit =
+      evalKingNanos += nanos
+      evalKingCalls += 1
+
+    def recordEvalActivity(nanos: Long): Unit =
+      evalActivityNanos += nanos
+      evalActivityCalls += 1
+
+    def recordEvalQueen(nanos: Long): Unit =
+      evalQueenNanos += nanos
+      evalQueenCalls += 1
+
+    def recordEvalMobility(nanos: Long): Unit =
+      evalMobilityNanos += nanos
+      evalMobilityCalls += 1
+
+    def recordEvalHanging(nanos: Long): Unit =
+      evalHangingNanos += nanos
+      evalHangingCalls += 1
+
+    def recordEvalAttack(nanos: Long): Unit =
+      evalAttackNanos += nanos
+      evalAttackCalls += 1
+
+    def recordEvalClearPath(nanos: Long): Unit =
+      evalClearPathNanos += nanos
+      evalClearPathCalls += 1
 
     private def printLine(label: String, nanos: Long, calls: Long, totalNanos: Long): Unit =
       val pct = if totalNanos > 0 then nanos.toDouble * 100.0 / totalNanos else 0.0
@@ -82,15 +180,22 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     val killerMoves: mutable.HashMap[Int, List[Move]] = mutable.HashMap.empty
     val historyScores: mutable.HashMap[Move, Int] = mutable.HashMap.empty
     var rootRepetitionCounts: Map[String, Int] = Map.empty
+    var rootSideToMove: Color = Color.White
+    var rootDrawContempt: Int = 0
+    var stopRequested: () => Boolean = () => false
     val pathRepetitionCounts: mutable.HashMap[String, Int] = mutable.HashMap.empty
     val nodes = java.util.concurrent.atomic.AtomicLong(0)
     val profiler = SearchProfiler()
 
   private val context = SearchContext()
+  private val searchLock = new Object
+  private val ponderCancel = AtomicBoolean(false)
   private val maxTranspositionEntries = 1000000
+  private val transpositionTrimTarget = maxTranspositionEntries * 7 / 10
   private val syzygyTablebase = SyzygyTablebase.fromEnv()
 
   override def chooseMove(state: AppState, remainingTimeMs: Option[Long] = None, incrementMs: Option[Long] = None): Future[Either[String, Move]] =
+    ponderCancel.set(true)
     val game = state.game
     val legal = game.legalMoves
     if legal.isEmpty then Future.successful(Left("No legal moves available."))
@@ -119,22 +224,59 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
             searchMoveAsync(game, legalForDecision, budget, repetitionCounts(state.startGame, state.moveHistory))
       }
 
+  override def ponder(state: AppState, maxWarmupMs: Long): Future[Unit] =
+    implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+    val budget = Math.min(maxWarmupMs, 5000L).max(0L)
+    val game = state.game
+    val legal = game.legalMoves
+
+    if budget <= 0L || legal.isEmpty || game.isCheckmate || game.isDraw then Future.unit
+    else
+      ponderCancel.set(false)
+      val legalForDecision = avoidRootThreefold(state, legal)
+      searchMoveAsync(
+        game,
+        legalForDecision,
+        budget,
+        repetitionCounts(state.startGame, state.moveHistory),
+        log = false,
+        stopRequested = () => ponderCancel.get()
+      ).map(_ => ()).recover { case _ => () }
+
   private def avoidRootThreefold(state: AppState, legal: List[Move]): List[Move] =
     if state.moveHistory.isEmpty then legal
     else
       val counts = repetitionCounts(state.startGame, state.moveHistory)
-      val repetitionMoves = legal.filter { move =>
+      val directRepetitionMoves = legal.filter { move =>
         state.game.applyMove(move).toOption.exists { next =>
-          counts.getOrElse(Fen.encodeNormalized(next), 0) + 1 >= 3
+          isImmediateThreefold(next, counts)
         }
       }
-      val alternatives = legal.filterNot(repetitionMoves.toSet)
-      val shouldAvoidDraw = staticEvaluate(state.game) >= -100
+      val shouldAvoidDraw = drawContemptFor(staticEvaluate(state.game)) > 0
 
-      if repetitionMoves.nonEmpty && alternatives.nonEmpty && shouldAvoidDraw then
-        println(s"  draw-avoid | skipping ${repetitionMoves.size} move(s) causing immediate threefold repetition")
+      val opponentRepetitionMoves =
+        if shouldAvoidDraw then
+          legal.filterNot(directRepetitionMoves.toSet).filter { move =>
+            state.game.applyMove(move).toOption.exists { next =>
+              next.legalMoves.exists { reply =>
+                next.applyMove(reply).toOption.exists(afterReply => isImmediateThreefold(afterReply, counts))
+              }
+            }
+          }
+        else Nil
+
+      val drawMoves = (directRepetitionMoves ++ opponentRepetitionMoves).distinct
+      val alternatives = legal.filterNot(drawMoves.toSet)
+
+      if drawMoves.nonEmpty && alternatives.nonEmpty && shouldAvoidDraw then
+        val opponentSuffix =
+          if opponentRepetitionMoves.nonEmpty then s", ${opponentRepetitionMoves.size} allowing opponent claim" else ""
+        println(s"  draw-avoid | skipping ${drawMoves.size} drawish root move(s) (${directRepetitionMoves.size} direct$opponentSuffix)")
         alternatives
       else legal
+
+  private def isImmediateThreefold(game: Game, counts: Map[String, Int]): Boolean =
+    counts.getOrElse(Fen.encodeNormalized(game), 0) + 1 >= 3
 
   private def repetitionCounts(startGame: Game, moves: Vector[Move]): Map[String, Int] =
     var game = startGame
@@ -193,11 +335,19 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
           Math.max(300L, Math.min(raw, normalCap).min(Math.max(300L, ms - panicReserve)))
       case None => thinkTimeMs
 
-  private def searchMoveAsync(game: Game, legal: List[Move], budget: Long, repetitions: Map[String, Int]): Future[Either[String, Move]] =
+  private def searchMoveAsync(
+      game: Game,
+      legal: List[Move],
+      budget: Long,
+      repetitions: Map[String, Int],
+      log: Boolean = true,
+      stopRequested: () => Boolean = () => false
+  ): Future[Either[String, Move]] =
     implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
     // Execute CPU-heavy search in a global thread pool
     Future {
+      searchLock.synchronized {
       val deadline = System.currentTimeMillis() + budget
       val searchStartNanos = System.nanoTime()
       var bestMoveSoFar = legal.head
@@ -206,11 +356,14 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       context.nodes.set(0) // Reset node counter for this specific move display
       context.profiler.reset()
       context.rootRepetitionCounts = repetitions
+      context.rootSideToMove = game.sideToMove
+      context.rootDrawContempt = drawContemptFor(staticEvaluate(game))
+      context.stopRequested = stopRequested
       context.pathRepetitionCounts.clear()
 
       try
         // Iterative Deepening
-        while System.currentTimeMillis() < deadline do
+        while !searchStopped(deadline, context) do
           val startTime = System.nanoTime()
           val nodesBeforeDepth = context.nodes.get()
           val (mv, score) = searchBestMoveWithAspiration(game, legal, currentDepth, bestScoreSoFar, deadline, context)
@@ -228,7 +381,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
             if score >= mateScoreThreshold then s"MATE+${(mateScore - score).max(0)}"
             else if score <= -mateScoreThreshold then s"MATE-${(mateScore + score).max(0)}"
             else s"${score / 100.0}"
-          println(s"  depth $currentDepth | score $scoreDesc | move $mv | nodes $depthNodes/$totalNodes | nps $nps | tt ${context.transpositionTable.size} | ${durationMs}ms")
+          if log then
+            println(s"  depth $currentDepth | score $scoreDesc | move $mv | nodes $depthNodes/$totalNodes | nps $nps | tt ${context.transpositionTable.size} | ${durationMs}ms")
 
           // If we found a mate, no need to search deeper
           if score >= mateScore - 100 then throw new TimeLimitExceededException()
@@ -236,8 +390,10 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       catch
         case _: TimeLimitExceededException => // Search aborted, keep best move from last completed depth
 
-      context.profiler.printSummary(System.nanoTime() - searchStartNanos, context.nodes.get(), context.transpositionTable.size)
+      if log then context.profiler.printSummary(System.nanoTime() - searchStartNanos, context.nodes.get(), context.transpositionTable.size)
+      context.stopRequested = () => false
       Right(bestMoveSoFar)
+      }
     }
 
   private def searchBestMoveWithAspiration(
@@ -256,7 +412,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       var beta = previousScore + window
       var result = searchBestMove(game, legal, depth, alpha, beta, deadline, context)
 
-      while (result._2 <= alpha || result._2 >= beta) && System.currentTimeMillis() < deadline do
+      while (result._2 <= alpha || result._2 >= beta) && !searchStopped(deadline, context) do
         window *= 2
         alpha = Math.max(-mateScore * 2, previousScore - window)
         beta = Math.min(mateScore * 2, previousScore + window)
@@ -276,7 +432,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     val ordered = orderedMoves(game, legal, ttBestMove, ply = 0, context)
     var i = 0
     while i < ordered.size && alpha < beta do
-      if System.currentTimeMillis() > deadline then throw new TimeLimitExceededException()
+      if searchStopped(deadline, context) then throw new TimeLimitExceededException()
 
       val mv = ordered(i)
       val next = applyMoveProfiled(game, mv, context)
@@ -298,11 +454,20 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     storeTransposition(context, positionKey, depth, bestScore, boundFor(bestScore, alphaOrig, beta), Some(bestMove), ply = 0)
     (bestMove, bestScore)
 
-  private def negamax(game: Game, depth: Int, alpha0: Int, beta0: Int, deadline: Long, ply: Int, context: SearchContext): Int =
+  private def negamax(
+      game: Game,
+      depth: Int,
+      alpha0: Int,
+      beta0: Int,
+      deadline: Long,
+      ply: Int,
+      context: SearchContext,
+      allowNullMove: Boolean = true
+  ): Int =
     context.nodes.incrementAndGet()
-    if System.currentTimeMillis() > deadline then throw new TimeLimitExceededException()
+    if searchStopped(deadline, context) then throw new TimeLimitExceededException()
 
-    if isRepetitionDraw(game, context) || game.halfMoveClock >= 100 then return drawScore
+    if isRepetitionDraw(game, context) || game.halfMoveClock >= 100 then return drawScoreFor(game, context)
 
     if depth <= 0 then
       if isInCheckProfiled(game, context) then
@@ -322,16 +487,38 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
             case _ =>
         case _ =>
 
+      val inCheck = isInCheckProfiled(game, context)
+      if shouldTryNullMove(game, depth, ply, inCheck, allowNullMove) then
+        context.profiler.nullMoveAttempts += 1
+        val reduction = nullMoveReduction(depth)
+        val nullGame = game.copy(
+          sideToMove = game.sideToMove.other,
+          enPassantTarget = None,
+          halfMoveClock = game.halfMoveClock + 1
+        )
+        val nullScore = -negamax(
+          nullGame,
+          depth - 1 - reduction,
+          -beta0,
+          -beta0 + 1,
+          deadline,
+          ply + 1,
+          context,
+          allowNullMove = false
+        )
+        if nullScore >= beta0 then
+          context.profiler.nullMoveCutoffs += 1
+          return beta0
+
       val legal = legalMovesProfiled(game, context)
       if legal.isEmpty then
-        if isInCheckProfiled(game, context) then -mateScore + ply
-        else drawScore
+        if inCheck then -mateScore + ply
+        else drawScoreFor(game, context)
       else
         val alphaOrig = alpha0
         var alpha = alpha0
         var best = -mateScore * 2
         var bestMove: Option[Move] = None
-        val inCheck = isInCheckProfiled(game, context)
 
         val ttBestMove = transpositionLookup(context, positionKey).flatMap(_.bestMove)
         val ordered = orderedMoves(game, legal, ttBestMove, ply, context)
@@ -360,6 +547,26 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
         storeTransposition(context, positionKey, depth, best, boundFor(best, alphaOrig, beta0), bestMove, ply)
         best
 
+  private def shouldTryNullMove(game: Game, depth: Int, ply: Int, inCheck: Boolean, allowNullMove: Boolean): Boolean =
+    allowNullMove &&
+      ply > 0 &&
+      depth >= 3 &&
+      !inCheck &&
+      farFromFiftyMoveDraw(game) &&
+      hasNullMoveMaterial(game, game.sideToMove)
+
+  private def farFromFiftyMoveDraw(game: Game): Boolean =
+    game.halfMoveClock < 95
+
+  private def hasNullMoveMaterial(game: Game, color: Color): Boolean =
+    val bitboards = game.board.bitboards
+    bitboards.queens(color) != 0L ||
+      bitboards.rooks(color) != 0L ||
+      Bitboards.popCount(bitboards.bishops(color) | bitboards.knights(color)) >= 2
+
+  private def nullMoveReduction(depth: Int): Int =
+    if depth >= 6 then 3 else 2
+
   private def lateMoveReduction(
       game: Game,
       move: Move,
@@ -383,7 +590,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     val ordered = orderedMoves(game, legal, ttBestMove = None, ply, context)
     var i = 0
     while i < ordered.size && alpha < beta do
-      if System.currentTimeMillis() > deadline then throw new TimeLimitExceededException()
+      if searchStopped(deadline, context) then throw new TimeLimitExceededException()
       val next = applyMoveProfiled(game, ordered(i), context)
       val score = -withRepetition(next, context)(quiescence(next, -beta, -alpha, deadline, ply + 1, context))
       best = Math.max(best, score)
@@ -393,8 +600,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
 
   private def quiescence(game: Game, alpha0: Int, beta: Int, deadline: Long, ply: Int, context: SearchContext): Int =
     context.nodes.incrementAndGet()
-    if System.currentTimeMillis() > deadline then throw new TimeLimitExceededException()
-    if isRepetitionDraw(game, context) || game.halfMoveClock >= 100 then return drawScore
+    if searchStopped(deadline, context) then throw new TimeLimitExceededException()
+    if isRepetitionDraw(game, context) || game.halfMoveClock >= 100 then return drawScoreFor(game, context)
 
     var alpha = alpha0
     val standPat = staticEvaluateProfiled(game, context)
@@ -413,6 +620,9 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
 
     alpha
 
+  private def searchStopped(deadline: Long, context: SearchContext): Boolean =
+    context.stopRequested() || System.currentTimeMillis() > deadline
+
   private def tacticalQuiescenceMoves(game: Game, legal: List[Move], ply: Int, context: SearchContext): List[Move] =
     legal.filter { move =>
       captureUrgency(game, move) > 0 || (ply <= 2 && givesCheck(game, move, context))
@@ -424,7 +634,15 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
 
   private val mateScore: Int = 100000
   private val mateScoreThreshold: Int = mateScore - 1000
-  private val drawScore: Int = 0
+  private def drawContemptFor(rootScore: Int): Int =
+    if rootScore >= 250 then 35
+    else if rootScore >= -100 then 20
+    else 0
+
+  private def drawScoreFor(game: Game, context: SearchContext): Int =
+    if context.rootDrawContempt == 0 then 0
+    else if game.sideToMove == context.rootSideToMove then -context.rootDrawContempt
+    else context.rootDrawContempt
 
   private def isRepetitionDraw(game: Game, context: SearchContext): Boolean =
     val key = Fen.encodeNormalized(game)
@@ -444,6 +662,9 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
   private final case class EvalContext(
       game: Game,
       board: Board,
+      bitboards: Bitboards,
+      whiteAttacks: AttackInfo,
+      blackAttacks: AttackInfo,
       whitePieces: List[(Pos, Piece)],
       blackPieces: List[(Pos, Piece)],
       whitePawns: List[Pos],
@@ -452,8 +673,12 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       blackKing: Option[Pos],
       whiteQueen: Option[Pos],
       blackQueen: Option[Pos],
-      phase: Int
+      phase: Int,
+      profiler: Option[SearchProfiler]
   ):
+    def attacksOf(color: Color): AttackInfo =
+      if color == Color.White then whiteAttacks else blackAttacks
+
     def piecesOf(color: Color): List[(Pos, Piece)] =
       if color == Color.White then whitePieces else blackPieces
 
@@ -466,9 +691,65 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     def queenOf(color: Color): Option[Pos] =
       if color == Color.White then whiteQueen else blackQueen
 
+  private final case class AttackInfo(
+      pawns: Long,
+      knights: Long,
+      bishops: Long,
+      rooks: Long,
+      queens: Long,
+      kings: Long
+  ):
+    def all: Long = pawns | knights | bishops | rooks | queens | kings
+
+    def byKind(kind: PieceType): Long =
+      kind match
+        case PieceType.Pawn   => pawns
+        case PieceType.Knight => knights
+        case PieceType.Bishop => bishops
+        case PieceType.Rook   => rooks
+        case PieceType.Queen  => queens
+        case PieceType.King   => kings
+
+  private object AttackInfo:
+    def from(bitboards: Bitboards, color: Color): AttackInfo =
+      var pawns = 0L
+      var knights = 0L
+      var bishops = 0L
+      var rooks = 0L
+      var queens = 0L
+      var kings = 0L
+
+      Bitboards.foreachSetBit(bitboards.pawns(color)) { square =>
+        pawns |= BitboardAttacks.attacksFrom(bitboards, square, Piece(color, PieceType.Pawn))
+      }
+      Bitboards.foreachSetBit(bitboards.knights(color)) { square =>
+        knights |= BitboardAttacks.attacksFrom(bitboards, square, Piece(color, PieceType.Knight))
+      }
+      Bitboards.foreachSetBit(bitboards.bishops(color)) { square =>
+        bishops |= BitboardAttacks.attacksFrom(bitboards, square, Piece(color, PieceType.Bishop))
+      }
+      Bitboards.foreachSetBit(bitboards.rooks(color)) { square =>
+        rooks |= BitboardAttacks.attacksFrom(bitboards, square, Piece(color, PieceType.Rook))
+      }
+      Bitboards.foreachSetBit(bitboards.queens(color)) { square =>
+        queens |= BitboardAttacks.attacksFrom(bitboards, square, Piece(color, PieceType.Queen))
+      }
+      Bitboards.foreachSetBit(bitboards.kings(color)) { square =>
+        kings |= BitboardAttacks.attacksFrom(bitboards, square, Piece(color, PieceType.King))
+      }
+
+      AttackInfo(pawns, knights, bishops, rooks, queens, kings)
+
   private object EvalContext:
-    def from(game: Game): EvalContext =
-      val pieces = game.board.allPieces.toList
+    def from(game: Game, profiler: Option[SearchProfiler] = None): EvalContext =
+      val bitboards = game.board.bitboards
+      val whiteAttacks = profileEval(profiler, _.recordEvalAttack) {
+        AttackInfo.from(bitboards, Color.White)
+      }
+      val blackAttacks = profileEval(profiler, _.recordEvalAttack) {
+        AttackInfo.from(bitboards, Color.Black)
+      }
+      val pieces = bitboards.pieceList(Color.White) ++ bitboards.pieceList(Color.Black)
       val whitePieces = pieces.collect { case entry @ (_, Piece(Color.White, _)) => entry }
       val blackPieces = pieces.collect { case entry @ (_, Piece(Color.Black, _)) => entry }
       val whitePawns = whitePieces.collect { case (pos, Piece(_, PieceType.Pawn)) => pos }
@@ -485,6 +766,9 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       EvalContext(
         game,
         game.board,
+        bitboards,
+        whiteAttacks,
+        blackAttacks,
         whitePieces,
         blackPieces,
         whitePawns,
@@ -493,7 +777,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
         blackKing,
         whiteQueen,
         blackQueen,
-        Math.min(phase, PestoTables.totalPhase)
+        Math.min(phase, PestoTables.totalPhase),
+        profiler
       )
 
   /**
@@ -505,40 +790,79 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       PestoTables.pieceScore(piece.kind, pos, isWhite, phase)
     }.sum
 
-  private def staticEvaluate(game: Game): Int =
-    val eval = EvalContext.from(game)
+  private def staticEvaluate(game: Game, profiler: Option[SearchProfiler] = None): Int =
+    val eval = profileEval(profiler, _.recordEvalContext) {
+      EvalContext.from(game, profiler)
+    }
     val phase = eval.phase
-    val whiteScore = colorScore(eval.whitePieces, isWhite = true,  phase)
-    val blackScore = colorScore(eval.blackPieces, isWhite = false, phase)
+    val material = profileEval(profiler, _.recordEvalMaterial) {
+      colorScore(eval.whitePieces, isWhite = true, phase) - colorScore(eval.blackPieces, isWhite = false, phase)
+    }
+    val pawns = profileEval(profiler, _.recordEvalPawn) {
+      pawnStructureScore(eval, Color.White) - pawnStructureScore(eval, Color.Black)
+    }
+    val kings = profileEval(profiler, _.recordEvalKing) {
+      kingSafetyScore(eval, Color.White) - kingSafetyScore(eval, Color.Black)
+    }
+    val activity = profileEval(profiler, _.recordEvalActivity) {
+      pieceActivityScore(eval, Color.White) - pieceActivityScore(eval, Color.Black)
+    }
+    val queen = profileEval(profiler, _.recordEvalQueen) {
+      queenInvasionScore(eval, Color.White) - queenInvasionScore(eval, Color.Black)
+    }
+    val mobility = profileEval(profiler, _.recordEvalMobility) {
+      mobilityScore(eval, Color.White) - mobilityScore(eval, Color.Black)
+    }
+    val hanging = profileEval(profiler, _.recordEvalHanging) {
+      hangingPiecesScore(eval, Color.White) - hangingPiecesScore(eval, Color.Black)
+    }
     val diff =
-      whiteScore - blackScore +
-        pawnStructureScore(eval, Color.White) - pawnStructureScore(eval, Color.Black) +
-        kingSafetyScore(eval, Color.White) - kingSafetyScore(eval, Color.Black) +
-        pieceActivityScore(eval, Color.White) - pieceActivityScore(eval, Color.Black) +
-        queenInvasionScore(eval, Color.White) - queenInvasionScore(eval, Color.Black) +
-        mobilityScore(eval, Color.White) - mobilityScore(eval, Color.Black) +
-        hangingPiecesScore(eval, Color.White) - hangingPiecesScore(eval, Color.Black)
+      material + pawns + kings + activity + queen + mobility + hanging
     game.sideToMove match
       case Color.White => diff
       case Color.Black => -diff
 
-  private def pawnStructureScore(eval: EvalContext, color: Color): Int =
-    val ownPawns = eval.pawnsOf(color)
-    val enemyPawns = eval.pawnsOf(color.other)
-    val pawnsByFile = ownPawns.groupBy(_.file)
+  private def profileEval[A](profiler: Option[SearchProfiler], record: SearchProfiler => Long => Unit)(body: => A): A =
+    profiler match
+      case None => body
+      case Some(p) =>
+        val start = System.nanoTime()
+        val result = body
+        record(p)(System.nanoTime() - start)
+        result
 
-    ownPawns.map { pawn =>
-      val doubledPenalty = if pawnsByFile.getOrElse(pawn.file, Nil).size > 1 then -14 else 0
-      val isolatedPenalty = if adjacentFiles(pawn.file).forall(file => !pawnsByFile.contains(file)) then -18 else 0
-      val backwardPenalty = if isBackwardPawn(pawn, color, ownPawns, enemyPawns) then -10 else 0
+  private def pawnStructureScore(eval: EvalContext, color: Color): Int =
+    val ownPawns = eval.bitboards.pawns(color)
+    val enemyPawns = eval.bitboards.pawns(color.other)
+    val ownFileCounts = Array.ofDim[Int](8)
+    val enemyAdjacentForward = Array.fill[Long](8)(0L)
+
+    Bitboards.foreachSetBit(ownPawns) { square =>
+      ownFileCounts(square & 7) += 1
+    }
+    var file = 0
+    while file < 8 do
+      enemyAdjacentForward(file) =
+        adjacentFilesInclusive(file).foldLeft(0L) { (acc, f) => acc | (enemyPawns & Bitboards.fileMask(f)) }
+      file += 1
+
+    var score = 0
+    Bitboards.foreachSetBit(ownPawns) { square =>
+      val pawn = Bitboards.pos(square)
+      val doubledPenalty = if ownFileCounts(pawn.file) > 1 then -14 else 0
+      val isolatedPenalty =
+        if adjacentFiles(pawn.file).forall(file => ownFileCounts(file) == 0) then -18 else 0
+      val backwardPenalty =
+        if isBackwardPawn(eval, pawn, color, ownPawns) then -10 else 0
       val passedBonus =
-        if isPassedPawn(pawn, color, enemyPawns) then
+        if isPassedPawn(pawn, color, enemyAdjacentForward(pawn.file)) then
           val advancement = if color == Color.White then pawn.rank else 7 - pawn.rank
           12 + advancement * advancement * 3
         else 0
 
-      doubledPenalty + isolatedPenalty + backwardPenalty + passedBonus
-    }.sum
+      score += doubledPenalty + isolatedPenalty + backwardPenalty + passedBonus
+    }
+    score
 
   private def kingSafetyScore(eval: EvalContext, color: Color): Int =
     eval.kingOf(color) match
@@ -551,18 +875,19 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
           else if eval.phase > PestoTables.totalPhase / 2 then -20
           else 0
 
-        val shieldScore = pawnShieldScore(eval.board, color, king)
+        val shieldScore = pawnShieldScore(eval.bitboards, color, king)
         val openFilePenalty = kingFileExposurePenalty(eval, color, king)
         val dangerPenalty = kingAttackDangerPenalty(eval, color, king)
         castledBonus + shieldScore - openFilePenalty - dangerPenalty
 
-  private def pawnShieldScore(board: Board, color: Color, king: Pos): Int =
+  private def pawnShieldScore(bitboards: Bitboards, color: Color, king: Pos): Int =
     val dir = pawnDirection(color)
+    val ownPawns = bitboards.pawns(color)
     adjacentFilesInclusive(king.file).map { file =>
       val front = Pos(file, king.rank + dir)
       val farFront = Pos(file, king.rank + 2 * dir)
-      if front.inBounds && board.pieceAt(front).contains(Piece(color, PieceType.Pawn)) then 12
-      else if farFront.inBounds && board.pieceAt(farFront).contains(Piece(color, PieceType.Pawn)) then 5
+      if front.inBounds && (ownPawns & Bitboards.mask(front)) != 0L then 12
+      else if farFront.inBounds && (ownPawns & Bitboards.mask(farFront)) != 0L then 5
       else if front.inBounds then -8
       else 0
     }.sum
@@ -583,8 +908,9 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
   private def kingAttackDangerPenalty(eval: EvalContext, color: Color, king: Pos): Int =
     val enemyPieces = eval.piecesOf(color.other)
     val zone = kingZone(king)
+    val enemyAttacks = eval.attacksOf(color.other).all
     val attackedZoneSquares =
-      zone.count(square => enemyPieces.exists { case (from, piece) => attacksSquare(eval.board, from, piece, square) })
+      zone.count(square => (enemyAttacks & Bitboards.mask(square)) != 0L)
 
     val closeEnemyQueenPenalty =
       eval.queenOf(color.other) match
@@ -621,28 +947,32 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
         val sameFile = pos.file == king.file
         val sameRank = pos.rank == king.rank
         val sameDiagonal = Math.abs(pos.file - king.file) == Math.abs(pos.rank - king.rank)
-        if (sameFile || sameRank || sameDiagonal) && clearPath(eval.board, pos, king) then
+        if (sameFile || sameRank || sameDiagonal) && clearPath(eval.bitboards, pos, king, eval.profiler) then
           if kind == PieceType.Queen then 35 else 22
         else 0
     }.sum
 
-  private def isPassedPawn(pawn: Pos, color: Color, enemyPawns: List[Pos]): Boolean =
-    enemyPawns.forall { enemy =>
-      !adjacentFilesInclusive(pawn.file).contains(enemy.file) || !isAhead(enemy.rank, pawn.rank, color)
+  private def isPassedPawn(pawn: Pos, color: Color, enemyAdjacentPawns: Long): Boolean =
+    var passed = true
+    Bitboards.foreachSetBit(enemyAdjacentPawns) { square =>
+      if passed then
+        val enemyRank = square >>> 3
+        if isAhead(enemyRank, pawn.rank, color) then passed = false
     }
+    passed
 
-  private def isBackwardPawn(pawn: Pos, color: Color, ownPawns: List[Pos], enemyPawns: List[Pos]): Boolean =
-    val supportedByNeighbor =
-      ownPawns.exists { other =>
-        other != pawn &&
-          adjacentFiles(pawn.file).contains(other.file) &&
-          !isAhead(other.rank, pawn.rank, color)
+  private def isBackwardPawn(eval: EvalContext, pawn: Pos, color: Color, ownPawns: Long): Boolean =
+    var supportedByNeighbor = false
+    adjacentFiles(pawn.file).foreach { file =>
+      Bitboards.foreachSetBit(ownPawns & Bitboards.fileMask(file)) { square =>
+        if !supportedByNeighbor then
+          val otherRank = square >>> 3
+          if !isAhead(otherRank, pawn.rank, color) then supportedByNeighbor = true
       }
+    }
     val front = Pos(pawn.file, pawn.rank + pawnDirection(color))
     val frontControlledByEnemy =
-      front.inBounds && enemyPawns.exists { enemy =>
-        Math.abs(enemy.file - front.file) == 1 && enemy.rank + pawnDirection(color.other) == front.rank
-      }
+      front.inBounds && (eval.attacksOf(color.other).pawns & Bitboards.mask(front)) != 0L
     !supportedByNeighbor && frontControlledByEnemy
 
   private def isAhead(candidateRank: Int, pawnRank: Int, color: Color): Boolean =
@@ -663,7 +993,6 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       case Color.Black => game.castlingRights.blackKingside || game.castlingRights.blackQueenside
 
   private def pieceActivityScore(eval: EvalContext, color: Color): Int =
-    val board = eval.board
     val phase = eval.phase
     val ownPieces = eval.piecesOf(color)
     val bishopPairBonus = if ownPieces.count(_._2.kind == PieceType.Bishop) >= 2 then 35 else 0
@@ -748,48 +1077,50 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     if pos.rank == targetRank then bonus else 0
 
   private def mobilityScore(eval: EvalContext, color: Color): Int =
-    val board = eval.board
     eval.piecesOf(color).map {
       case (pos, Piece(_, kind)) =>
         kind match
-          case PieceType.Knight => knightMobility(board, color, pos) * 4
-          case PieceType.Bishop => slidingMobility(board, color, pos, bishopDirections) * 3
-          case PieceType.Rook   => slidingMobility(board, color, pos, rookDirections) * 2
-          case PieceType.Queen  => if isOpeningPhase(eval.phase) then 0 else slidingMobility(board, color, pos, queenDirections)
-          case PieceType.Pawn   => pawnMobility(board, color, pos) * 2
+          case PieceType.Knight => knightMobility(eval.bitboards, color, pos) * 4
+          case PieceType.Bishop => slidingMobility(eval.bitboards, color, pos, bishopDirections) * 3
+          case PieceType.Rook   => slidingMobility(eval.bitboards, color, pos, rookDirections) * 2
+          case PieceType.Queen  => if isOpeningPhase(eval.phase) then 0 else slidingMobility(eval.bitboards, color, pos, queenDirections)
+          case PieceType.Pawn   => pawnMobility(eval.bitboards, color, pos) * 2
           case PieceType.King   => 0
     }.sum
 
-  private def knightMobility(board: Board, color: Color, pos: Pos): Int =
+  private def knightMobility(bitboards: Bitboards, color: Color, pos: Pos): Int =
     knightOffsets.count { offset =>
       val to = pos + offset
-      to.inBounds && !board.pieceAt(to).exists(_.color == color)
+      to.inBounds && (bitboards.pieces(color) & Bitboards.mask(to)) == 0L
     }
 
-  private def slidingMobility(board: Board, color: Color, pos: Pos, directions: List[(Int, Int)]): Int =
-    directions.map(direction => rayMobility(board, color, pos, direction)).sum
+  private def slidingMobility(bitboards: Bitboards, color: Color, pos: Pos, directions: List[(Int, Int)]): Int =
+    directions.map(direction => rayMobility(bitboards, color, pos, direction)).sum
 
-  private def rayMobility(board: Board, color: Color, pos: Pos, direction: (Int, Int)): Int =
+  private def rayMobility(bitboards: Bitboards, color: Color, pos: Pos, direction: (Int, Int)): Int =
     var current = pos + direction
     var count = 0
     var blocked = false
+    val ownPieces = bitboards.pieces(color)
+    val occupied = bitboards.occupied
     while current.inBounds && !blocked do
-      board.pieceAt(current) match
-        case None =>
-          count += 1
-          current = current + direction
-        case Some(piece) =>
-          if piece.color != color then count += 1
-          blocked = true
+      val bit = Bitboards.mask(current)
+      if (occupied & bit) == 0L then
+        count += 1
+        current = current + direction
+      else
+        if (ownPieces & bit) == 0L then count += 1
+        blocked = true
     count
 
-  private def pawnMobility(board: Board, color: Color, pos: Pos): Int =
+  private def pawnMobility(bitboards: Bitboards, color: Color, pos: Pos): Int =
     val dir = pawnDirection(color)
     val oneForward = pos + (0, dir)
-    val quiet = if oneForward.inBounds && board.isEmpty(oneForward) then 1 else 0
+    val quiet = if oneForward.inBounds && (bitboards.occupied & Bitboards.mask(oneForward)) == 0L then 1 else 0
+    val enemies = bitboards.pieces(color.other)
     val captures =
       List(pos + (-1, dir), pos + (1, dir)).count { to =>
-        to.inBounds && board.pieceAt(to).exists(_.color == color.other)
+        to.inBounds && (enemies & Bitboards.mask(to)) != 0L
       }
     quiet + captures
 
@@ -806,15 +1137,15 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     bishopDirections ++ rookDirections
 
   private def hangingPiecesScore(eval: EvalContext, color: Color): Int =
-    val board = eval.board
-    val attackers = eval.piecesOf(color.other)
     val defenders = eval.piecesOf(color)
+    val attackerInfo = eval.attacksOf(color.other)
+    val defenderAttacks = eval.attacksOf(color).all
     defenders.collect {
       case (pos, piece) if piece.kind != PieceType.King =>
-        leastAttackerValue(board, attackers, pos) match
+        leastAttackerValue(attackerInfo, pos) match
           case None => 0
           case Some(leastAttacker) =>
-            val defended = isAttackedBy(board, defenders, pos)
+            val defended = (defenderAttacks & Bitboards.mask(pos)) != 0L
             val victim = pieceValue(piece.kind)
             val basePenalty =
               if !defended then victim / 3
@@ -823,53 +1154,29 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
             -Math.min(basePenalty, 300)
     }.sum
 
-  private def leastAttackerValue(board: Board, candidates: List[(Pos, Piece)], target: Pos): Option[Int] =
-    var best = Int.MaxValue
-    var found = false
-    candidates.foreach { case (from, piece) =>
-      if attacksSquare(board, from, piece, target) then
-        best = Math.min(best, pieceValue(piece.kind))
-        found = true
-    }
-    if found then Some(best) else None
+  private def leastAttackerValue(attackerInfo: AttackInfo, target: Pos): Option[Int] =
+    val targetBit = Bitboards.mask(target)
+    val attackerOrder = List(PieceType.King, PieceType.Pawn, PieceType.Knight, PieceType.Bishop, PieceType.Rook, PieceType.Queen)
+    attackerOrder.find(kind => (attackerInfo.byKind(kind) & targetBit) != 0L).map(pieceValue)
 
-  private def isAttackedBy(board: Board, candidates: List[(Pos, Piece)], target: Pos): Boolean =
-    candidates.exists { case (from, piece) =>
-      attacksSquare(board, from, piece, target)
+  private def isAttackedBy(bitboards: Bitboards, attacker: Color, target: Pos, profiler: Option[SearchProfiler]): Boolean =
+    profileEval(profiler, _.recordEvalAttack) {
+      BitboardAttacks.isAttackedBy(bitboards, attacker, target)
     }
 
-  private def attacksSquare(board: Board, from: Pos, piece: Piece, target: Pos): Boolean =
-    if from == target then false
-    else
-      val df = target.file - from.file
-      val dr = target.rank - from.rank
-      val absDf = Math.abs(df)
-      val absDr = Math.abs(dr)
+  private def isAttackedByKind(bitboards: Bitboards, attacker: Color, kind: PieceType, target: Pos, profiler: Option[SearchProfiler]): Boolean =
+    profileEval(profiler, _.recordEvalAttack) {
+      BitboardAttacks.isAttackedByKind(bitboards, attacker, kind, target)
+    }
 
-      piece.kind match
-        case PieceType.King =>
-          absDf <= 1 && absDr <= 1
-        case PieceType.Queen =>
-          ((df == 0 && dr != 0) || (dr == 0 && df != 0) || (absDf == absDr && df != 0)) && clearPath(board, from, target)
-        case PieceType.Rook =>
-          ((df == 0 && dr != 0) || (dr == 0 && df != 0)) && clearPath(board, from, target)
-        case PieceType.Bishop =>
-          absDf == absDr && df != 0 && clearPath(board, from, target)
-        case PieceType.Knight =>
-          (absDf == 2 && absDr == 1) || (absDf == 1 && absDr == 2)
-        case PieceType.Pawn =>
-          val dir = pawnDirection(piece.color)
-          absDf == 1 && dr == dir
+  private def attacksSquare(bitboards: Bitboards, from: Pos, piece: Piece, target: Pos, profiler: Option[SearchProfiler]): Boolean =
+    profileEval(profiler, _.recordEvalAttack) {
+      BitboardAttacks.attacksSquare(bitboards, from, piece, target)
+    }
 
-  private def clearPath(board: Board, from: Pos, to: Pos): Boolean =
-    val df = to.file - from.file
-    val dr = to.rank - from.rank
-    val stepF = Integer.signum(df)
-    val stepR = Integer.signum(dr)
-    val steps = Math.max(Math.abs(df), Math.abs(dr)) - 1
-
-    (1 to steps).forall { i =>
-      board.isEmpty(Pos(from.file + stepF * i, from.rank + stepR * i))
+  private def clearPath(bitboards: Bitboards, from: Pos, to: Pos, profiler: Option[SearchProfiler]): Boolean =
+    profileEval(profiler, _.recordEvalClearPath) {
+      BitboardAttacks.clearPath(bitboards, from, to)
     }
 
   // Used only for move ordering (MVV-LVA style) so we keep the simple centipawn values.
@@ -949,7 +1256,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     if !context.profiler.enabled then staticEvaluate(game)
     else
       val start = System.nanoTime()
-      val result = staticEvaluate(game)
+      val result = staticEvaluate(game, Some(context.profiler))
       context.profiler.evaluateNanos += System.nanoTime() - start
       context.profiler.evaluateCalls += 1
       result
@@ -999,11 +1306,36 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       bestMove: Option[Move],
       ply: Int
   ): Unit =
-    if context.transpositionTable.size >= maxTranspositionEntries then context.transpositionTable.clear()
+    if context.transpositionTable.size >= maxTranspositionEntries then trimTranspositionTable(context)
     val storedScore = scoreToTransposition(score, ply)
     context.transpositionTable.get(key) match
       case Some(existing) if existing.depth > depth =>
       case _ => context.transpositionTable.update(key, TranspositionEntry(depth, storedScore, bound, bestMove))
+
+  private def trimTranspositionTable(context: SearchContext): Unit =
+    val before = context.transpositionTable.size
+    var removed = 0
+
+    def removeUntilTarget(predicate: TranspositionEntry => Boolean): Unit =
+      if context.transpositionTable.size > transpositionTrimTarget then
+        val needed = context.transpositionTable.size - transpositionTrimTarget
+        val keys =
+          context.transpositionTable.iterator
+            .collect { case (key, entry) if predicate(entry) => key }
+            .take(needed)
+            .toList
+        keys.foreach { key =>
+          if context.transpositionTable.remove(key).nonEmpty then removed += 1
+        }
+
+    removeUntilTarget(entry => entry.depth <= 1)
+    removeUntilTarget(entry => entry.depth <= 2 && entry.bound != Bound.Exact)
+    removeUntilTarget(entry => entry.depth <= 2)
+    removeUntilTarget(entry => entry.depth <= 3 && entry.bound != Bound.Exact)
+    removeUntilTarget(_ => true)
+
+    if removed > 0 then
+      println(s"  tt trim | $before -> ${context.transpositionTable.size} entries")
 
   private def scoreToTransposition(score: Int, ply: Int): Int =
     if score >= mateScoreThreshold then score + ply
