@@ -9,3 +9,5 @@ trait ChessBot:
   def name: String
   def chooseMove(state: AppState, remainingTimeMs: Option[Long] = None, incrementMs: Option[Long] = None): Future[Either[String, Move]]
   def ponder(state: AppState, maxWarmupMs: Long): Future[Unit] = Future.unit
+  def predictedReply(state: AppState): Option[Move] = None
+  def predictedReplies(state: AppState): List[Move] = predictedReply(state).toList

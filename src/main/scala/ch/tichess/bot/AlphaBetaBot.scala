@@ -190,12 +190,14 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
   private val context = SearchContext()
   private val searchLock = new Object
   private val ponderCancel = AtomicBoolean(false)
+  @volatile private var latestPredictedReplies: Option[(String, List[Move])] = None
   private val maxTranspositionEntries = 1000000
   private val transpositionTrimTarget = maxTranspositionEntries * 7 / 10
   private val syzygyTablebase = SyzygyTablebase.fromEnv()
 
   override def chooseMove(state: AppState, remainingTimeMs: Option[Long] = None, incrementMs: Option[Long] = None): Future[Either[String, Move]] =
     ponderCancel.set(true)
+    latestPredictedReplies = None
     val game = state.game
     val legal = game.legalMoves
     if legal.isEmpty then Future.successful(Left("No legal moves available."))
@@ -242,6 +244,16 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
         log = false,
         stopRequested = () => ponderCancel.get()
       ).map(_ => ()).recover { case _ => () }
+
+  override def predictedReply(state: AppState): Option[Move] =
+    predictedReplies(state).headOption
+
+  override def predictedReplies(state: AppState): List[Move] =
+    latestPredictedReplies match
+      case Some((fen, moves)) if fen == Fen.encodeNormalized(state.game) =>
+        val legal = state.game.legalMoves.toSet
+        moves.filter(legal.contains).take(3)
+      case _ => Nil
 
   private def avoidRootThreefold(state: AppState, legal: List[Move]): List[Move] =
     if state.moveHistory.isEmpty then legal
@@ -390,10 +402,24 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       catch
         case _: TimeLimitExceededException => // Search aborted, keep best move from last completed depth
 
-      if log then context.profiler.printSummary(System.nanoTime() - searchStartNanos, context.nodes.get(), context.transpositionTable.size)
+      if log then
+        rememberPredictedReply(game, bestMoveSoFar, context)
+        context.profiler.printSummary(System.nanoTime() - searchStartNanos, context.nodes.get(), context.transpositionTable.size)
       context.stopRequested = () => false
       Right(bestMoveSoFar)
       }
+    }
+
+  private def rememberPredictedReply(game: Game, bestMove: Move, context: SearchContext): Unit =
+    game.applyMove(bestMove).toOption.foreach { afterMove =>
+      val childKey = transpositionKey(afterMove, context)
+      val ttBestMove = transpositionLookup(context, childKey).flatMap(_.bestMove)
+      val replies = afterMove.legalMoves
+      val predictions =
+        orderedMoves(afterMove, replies, ttBestMove, ply = 1, context)
+          .distinct
+          .take(3)
+      latestPredictedReplies = Option.when(predictions.nonEmpty)(Fen.encodeNormalized(afterMove) -> predictions)
     }
 
   private def searchBestMoveWithAspiration(
@@ -857,12 +883,45 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
       val passedBonus =
         if isPassedPawn(pawn, color, enemyAdjacentForward(pawn.file)) then
           val advancement = if color == Color.White then pawn.rank else 7 - pawn.rank
-          12 + advancement * advancement * 3
+          12 + advancement * advancement * 3 + dangerousPassedPawnBonus(eval, pawn, color, advancement)
         else 0
 
       score += doubledPenalty + isolatedPenalty + backwardPenalty + passedBonus
     }
     score
+
+  private def dangerousPassedPawnBonus(eval: EvalContext, pawn: Pos, color: Color, advancement: Int): Int =
+    if advancement < 4 then 0
+    else
+      val front = Pos(pawn.file, pawn.rank + pawnDirection(color))
+      val promotionRank = if color == Color.White then 7 else 0
+      val ownAttacks = eval.attacksOf(color).all
+      val enemyAttacks = eval.attacksOf(color.other).all
+      val pawnBit = Bitboards.mask(pawn)
+      val frontBit = if front.inBounds then Bitboards.mask(front) else 0L
+
+      val rankDanger =
+        advancement match
+          case 4 => 12
+          case 5 => 35
+          case 6 => 90
+          case _ => 0
+      val promotionThreat = if front.inBounds && front.rank == promotionRank then 90 else 0
+      val supported = (ownAttacks & pawnBit) != 0L
+      val supportedBonus = if supported then 16 + advancement * 8 else 0
+      val frontControlled = front.inBounds && (ownAttacks & frontBit) != 0L
+      val frontControlBonus = if frontControlled then 12 + advancement * 6 else 0
+      val blockaded = front.inBounds && (eval.bitboards.occupied & frontBit) != 0L
+      val blockadePenalty = if blockaded then 45 else 0
+      val frontContestedPenalty =
+        if front.inBounds && (enemyAttacks & frontBit) != 0L && !frontControlled then 18 else 0
+      val closeKingPenalty = eval.kingOf(color.other).map { king =>
+        val distance = Math.max(Math.abs(king.file - pawn.file), Math.abs(king.rank - pawn.rank))
+        if distance <= 1 then 35 else if distance == 2 then 18 else 0
+      }.getOrElse(0)
+
+      rankDanger + promotionThreat + supportedBonus + frontControlBonus -
+        blockadePenalty - frontContestedPenalty - closeKingPenalty
 
   private def kingSafetyScore(eval: EvalContext, color: Color): Int =
     eval.kingOf(color) match
