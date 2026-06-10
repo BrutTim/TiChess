@@ -5,7 +5,8 @@ import ch.tichess.view.ConsoleView
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import ch.tichess.bot.lichess.OutgoingChallenge
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.duration.Duration
 
 object Main:
   def main(args: Array[String]): Unit =
@@ -43,9 +44,11 @@ object Main:
       }
     }
     
-    // Keep application alive
-    scala.io.StdIn.readLine("Bot is running. Press ENTER to stop...\n")
-    system.terminate()
+    sys.addShutdownHook {
+      system.terminate()
+    }
+    println("Bot is running. Stop it with SIGTERM or CTRL+C.")
+    Await.result(system.whenTerminated, Duration.Inf)
 
   private def parseOutgoingChallenge(args: List[String]): Option[OutgoingChallenge] =
     val challengeIndex = args.indexWhere(arg => arg == "challenge" || arg == "--challenge")

@@ -13,7 +13,11 @@ import ch.tichess.model.Fen
  *
  * Note: this is intended as an MVP and therefore keeps the evaluation cheap.
  */
-class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase] = None) extends ChessBot:
+class AlphaBetaBot(
+    thinkTimeMs: Long = 10000L,
+    openingDb: Option[OpeningDatabase] = None,
+    syzygyTablebase: Option[SyzygyTablebase] = SyzygyTablebase.fromEnv()
+) extends ChessBot:
   override val name: String = s"AlphaBetaBot(time=${thinkTimeMs}ms)"
 
   private class TimeLimitExceededException extends RuntimeException
@@ -193,7 +197,6 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
   @volatile private var latestPredictedReplies: Option[(String, List[Move])] = None
   private val maxTranspositionEntries = 1000000
   private val transpositionTrimTarget = maxTranspositionEntries * 7 / 10
-  private val syzygyTablebase = SyzygyTablebase.fromEnv()
 
   override def chooseMove(state: AppState, remainingTimeMs: Option[Long] = None, incrementMs: Option[Long] = None): Future[Either[String, Move]] =
     ponderCancel.set(true)
@@ -215,7 +218,8 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
 
       dbFuture.flatMap { dbMoves =>
         val validDbMoves = dbMoves.filter(m => legalForDecision.contains(m.move))
-        rootSyzygyMove(game, legalForDecision).orElse(syzygyTransitionMove(game, legalForDecision)) match
+        val repetitions = repetitionCounts(state.startGame, state.moveHistory)
+        rootSyzygyMove(game, legalForDecision, repetitions).orElse(syzygyTransitionMove(game, legalForDecision)) match
           case Some(tablebaseMove) =>
             Future.successful(Right(tablebaseMove))
           case None if validDbMoves.nonEmpty =>
@@ -223,7 +227,7 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
             val bestDbMove = validDbMoves.maxBy(_.score).move
             Future.successful(Right(bestDbMove))
           case None =>
-            searchMoveAsync(game, legalForDecision, budget, repetitionCounts(state.startGame, state.moveHistory))
+            searchMoveAsync(game, legalForDecision, budget, repetitions)
       }
 
   override def ponder(state: AppState, maxWarmupMs: Long): Future[Unit] =
@@ -302,11 +306,47 @@ class AlphaBetaBot(thinkTimeMs: Long = 10000L, openingDb: Option[OpeningDatabase
     }
     counts.toMap
 
-  private def rootSyzygyMove(game: Game, legal: List[Move]): Option[Move] =
-    syzygyTablebase.flatMap(_.probe(game)).filter(result => legal.contains(result.bestMove)).map { result =>
-      println(s"  syzygy | root ${result.label} | move ${result.bestMove}")
-      result.bestMove
+  private def rootSyzygyMove(game: Game, legal: List[Move], repetitions: Map[String, Int]): Option[Move] =
+    syzygyTablebase.flatMap(_.probe(game)).flatMap { result =>
+      val legalSet = legal.toSet
+      val evaluated =
+        result.moves
+          .filter(evaluation => legalSet.contains(evaluation.move))
+          .flatMap(evaluation => syzygyRootScore(game, evaluation, repetitions))
+
+      val chosen =
+        if evaluated.nonEmpty then Some(evaluated.maxBy(_.ordering).move)
+        else Option.when(legalSet.contains(result.bestMove))(result.bestMove)
+
+      chosen.map { move =>
+        println(s"  syzygy | root ${result.label} | move $move")
+        move
+      }
     }
+
+  private final case class SyzygyRootChoice(move: Move, ordering: (Int, Int, Int, Int))
+
+  private def syzygyRootScore(
+      game: Game,
+      evaluation: SyzygyTablebase.MoveEvaluation,
+      repetitions: Map[String, Int]
+  ): Option[SyzygyRootChoice] =
+    game.applyMove(evaluation.move).toOption.map { next =>
+      val repeatCount = repetitions.getOrElse(Fen.encodeNormalized(next), 0) + 1
+      val effectiveWdl = if repeatCount >= 3 then Math.min(evaluation.wdl, 0) else evaluation.wdl
+      SyzygyRootChoice(
+        evaluation.move,
+        (
+          effectiveWdl,
+          if repeatCount >= 3 then 0 else 1,
+          -repeatCount,
+          syzygyDtzScore(evaluation.wdl, evaluation.dtz)
+        )
+      )
+    }
+
+  private def syzygyDtzScore(wdl: Int, dtz: Int): Int =
+    if wdl >= 0 then -Math.abs(dtz) else Math.abs(dtz)
 
   private def syzygyTransitionMove(game: Game, legal: List[Move]): Option[Move] =
     if game.board.allPieces.size != 6 then None

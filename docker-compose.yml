@@ -1,64 +1,156 @@
+x-tichess-service: &tichess-service
+  image: tichess:local
+  build:
+    context: .
+  restart: unless-stopped
+
 services:
   model-service:
-    build:
-      context: .
-      args:
-        MAIN_CLASS: ch.tichess.services.ModelServer
-    container_name: tichess-model-service
+    <<: *tichess-service
     environment:
-      MODEL_SERVICE_PORT: 8081
+      MAIN_CLASS: ch.tichess.services.ModelServer
+      MODEL_SERVICE_PORT: "8081"
+      JAVA_OPTS: -XX:MaxRAMPercentage=75
     ports:
       - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
 
   controller-service:
-    build:
-      context: .
-      args:
-        MAIN_CLASS: ch.tichess.services.ControllerServer
-    container_name: tichess-controller-service
+    <<: *tichess-service
     depends_on:
-      - model-service
-      - postgres-db
-      - mongo-db
+      model-service:
+        condition: service_healthy
+      mongo-db:
+        condition: service_healthy
     environment:
-      CONTROLLER_SERVICE_PORT: 8082
+      MAIN_CLASS: ch.tichess.services.ControllerServer
+      CONTROLLER_SERVICE_PORT: "8082"
       MODEL_SERVICE_URL: http://model-service:8081
       DB_TYPE: mongo
       MONGO_URI: mongodb://mongo-db:27017
-      DB_HOST: postgres-db
-      DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: password
-      DB_NAME: tichess
+      JAVA_OPTS: -XX:MaxRAMPercentage=75
     ports:
       - "8082:8082"
-
-  postgres-db:
-    image: postgres:15-alpine
-    container_name: tichess-postgres-db
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: tichess
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
 
   mongo-db:
     image: mongo:6.0
-    container_name: tichess-mongo-db
-    ports:
-      - "27017:27017"
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   view-service:
-    build:
-      context: .
-      args:
-        MAIN_CLASS: ch.tichess.view.RestServer
-    container_name: tichess-view-service
+    <<: *tichess-service
     depends_on:
-      - controller-service
+      controller-service:
+        condition: service_healthy
     environment:
-      VIEW_SERVICE_PORT: 8080
+      MAIN_CLASS: ch.tichess.view.RestServer
+      VIEW_SERVICE_PORT: "8080"
       CONTROLLER_SERVICE_URL: http://controller-service:8082
+      JAVA_OPTS: -XX:MaxRAMPercentage=75
     ports:
-      - "8080:8080"
+      - "${VIEW_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  kafka:
+    image: apache/kafka:3.9.1
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,CONTROLLER://:19093,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:19093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_NUM_PARTITIONS: "1"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic tichess.commands --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic tichess.events --partitions 1 --replication-factor 1
+
+  stream-service:
+    <<: *tichess-service
+    depends_on:
+      controller-service:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      MAIN_CLASS: ch.tichess.streaming.StreamServer
+      STREAM_SERVICE_PORT: "8083"
+      CONTROLLER_SERVICE_URL: http://controller-service:8082
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_COMMANDS_TOPIC: tichess.commands
+      KAFKA_EVENTS_TOPIC: tichess.events
+      KAFKA_CONSUMER_GROUP: tichess-stream-service
+      JAVA_OPTS: -XX:MaxRAMPercentage=75
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  lichess-bot:
+    <<: *tichess-service
+    profiles: ["bot"]
+    environment:
+      MAIN_CLASS: ch.tichess.Main
+      APP_ARGS: bot
+      LICHESS_TOKEN: ${LICHESS_TOKEN:-}
+      JAVA_OPTS: -XX:MaxRAMPercentage=75
+      SYZYGY_PATH: ${SYZYGY_PATH:-}
+    volumes:
+      - ${SYZYGY_PATH:-./.empty-syzygy}:${SYZYGY_PATH:-/tablebases}:ro
+
+volumes:
+  mongo-data:
+  kafka-data:

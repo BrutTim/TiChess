@@ -57,35 +57,42 @@ object ControllerServer extends JsonSupport:
     var appState = Await.result(loadStateFromDb(dao), Duration.Inf)
 
     val route =
-      pathPrefix("api" / "controller") {
-        concat(
-          post {
-            path("update") {
-              entity(as[CommandRequest]) { req =>
-                onComplete(modelServiceReady(modelService, appState, req.input, challengeDao)) {
-                  case Success(res) =>
-                    appState = res.state
-                    // Save state asynchronously
-                    saveStateToDb(dao, appState)
-                    complete(CommandResponse(success = true, res.message, Some(Fen.encode(res.game)), res.quit))
-                  case Failure(ex) =>
-                    complete(CommandResponse(success = false, Some(ex.getMessage), None, false))
+      concat(
+        path("health") {
+          get {
+            complete("ok")
+          }
+        },
+        pathPrefix("api" / "controller") {
+          concat(
+            post {
+              path("update") {
+                entity(as[CommandRequest]) { req =>
+                  onComplete(modelServiceReady(modelService, appState, req.input, challengeDao)) {
+                    case Success(res) =>
+                      appState = res.state
+                      // Save state asynchronously
+                      saveStateToDb(dao, appState)
+                      complete(CommandResponse(success = true, res.message, Some(Fen.encode(res.game)), res.quit))
+                    case Failure(ex) =>
+                      complete(CommandResponse(success = false, Some(ex.getMessage), None, false))
+                  }
                 }
               }
+            },
+            get {
+              concat(
+                path("state") {
+                  complete(StateResponseBuilder.fromAppState(appState))
+                },
+                path("challenges") {
+                  complete(List.empty[ch.tichess.controller.persistence.ChallengeRecord])
+                }
+              )
             }
-          },
-          get {
-            concat(
-              path("state") {
-                complete(StateResponseBuilder.fromAppState(appState))
-              },
-              path("challenges") {
-                complete(List.empty[ch.tichess.controller.persistence.ChallengeRecord])
-              }
-            )
-          }
-        )
-      }
+          )
+        }
+      )
 
     Http().newServerAt("0.0.0.0", port).bind(route)
     println(s"Controller service online at http://localhost:$port/")

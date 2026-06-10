@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lichess-bot
+  namespace: tichess
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lichess-bot
+  template:
+    metadata:
+      labels:
+        app: lichess-bot
+    spec:
+      containers:
+        - name: lichess-bot
+          image: tichess:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MAIN_CLASS
+              value: ch.tichess.Main
+            - name: APP_ARGS
+              value: bot
+            - name: LICHESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lichess-bot
+                  key: token
+            - name: JAVA_OPTS
+              value: -XX:MaxRAMPercentage=75
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+      terminationGracePeriodSeconds: 30

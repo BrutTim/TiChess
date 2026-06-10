@@ -52,6 +52,7 @@ final class SyzygyTablebase(
 
   private def parseProbeOutput(output: String): Option[ProbeResult] =
     val lines = output.linesIterator.map(_.trim).toList
+    val evaluatedMoves = lines.flatMap(parseMoveEvaluation)
     for
       moveLine <- lines.find(_.startsWith("bestmove "))
       bestMove <- parseUciMove(moveLine.stripPrefix("bestmove ").trim)
@@ -59,7 +60,18 @@ final class SyzygyTablebase(
       wdl <- wdlLine.stripPrefix("wdl ").trim.toIntOption
       dtzLine <- lines.find(_.startsWith("dtz "))
       dtz <- dtzLine.stripPrefix("dtz ").trim.toIntOption
-    yield ProbeResult(bestMove, wdl, dtz)
+    yield ProbeResult(bestMove, wdl, dtz, evaluatedMoves)
+
+  private def parseMoveEvaluation(line: String): Option[SyzygyTablebase.MoveEvaluation] =
+    val parts = line.split("\\s+").toList
+    parts match
+      case "move" :: uci :: "wdl" :: wdlText :: "dtz" :: dtzText :: Nil =>
+        for
+          move <- parseUciMove(uci)
+          wdl <- wdlText.toIntOption
+          dtz <- dtzText.toIntOption
+        yield SyzygyTablebase.MoveEvaluation(move, wdl, dtz)
+      case _ => None
 
   private def parseUciMove(uci: String): Option[Move] =
     if uci.length < 4 then None
@@ -75,7 +87,9 @@ final class SyzygyTablebase(
     else PromotionRole.fromPromotionChar(s).toOption.map(Some(_))
 
 object SyzygyTablebase:
-  final case class ProbeResult(bestMove: Move, wdl: Int, dtz: Int):
+  final case class MoveEvaluation(move: Move, wdl: Int, dtz: Int)
+
+  final case class ProbeResult(bestMove: Move, wdl: Int, dtz: Int, moves: List[MoveEvaluation] = Nil):
     def label: String =
       val wdlText =
         if wdl > 0 then "win"
@@ -89,20 +103,26 @@ object SyzygyTablebase:
     fromConfiguredPath(
       sys.env.get("SYZYGY_PATH"),
       localDefaultAvailable = File(localDefaultPath).isDirectory,
-      sys.env.get("TICHESS_PYTHON")
+      sys.env.get("TICHESS_PYTHON"),
+      sys.env.get("SYZYGY_SCRIPT")
     )
 
   private[bot] def fromConfiguredPath(
       configuredSyzygyPath: Option[String],
       localDefaultAvailable: Boolean,
-      configuredPython: Option[String]
+      configuredPython: Option[String],
+      configuredScript: Option[String] = None
   ): Option[SyzygyTablebase] =
     val configuredPath =
       configuredSyzygyPath.filter(_.nonEmpty)
         .orElse(Option.when(localDefaultAvailable)(localDefaultPath))
 
     configuredPath.map { path =>
-      SyzygyTablebase(path, configuredPython.getOrElse(defaultPythonCommand))
+      SyzygyTablebase(
+        path,
+        configuredPython.getOrElse(defaultPythonCommand),
+        configuredScript.filter(_.nonEmpty).getOrElse("src/main/python/syzygy_probe.py")
+      )
     }
 
   private def defaultPythonCommand: String =

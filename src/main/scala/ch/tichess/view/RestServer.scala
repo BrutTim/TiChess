@@ -23,6 +23,11 @@ object RestServer extends JsonSupport:
 
     val route =
       concat(
+        path("health") {
+          get {
+            complete("ok")
+          }
+        },
         pathEndOrSingleSlash {
           get {
             val html =
