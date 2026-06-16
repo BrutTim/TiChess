@@ -13,11 +13,11 @@ TiChess ist ein Schachprojekt in Scala 3.3.4. Es kombiniert eine funktionale Sch
 - Puzzle-/Challenge-Training mit Lichess-Puzzle-Seeds
 - persistenter Spielstand über Datenbank
 - Web-UI, Console-UI und lokale ScalaFX-GUI
-- 100% Statement- und Branch-Coverage im aktuellen Testsetup
+- 99,18% Statement- und 99,26% Branch-Coverage im aktuellen Testsetup
 
 ## Architektur
 
-Die Docker-Anwendung ist in drei Services aufgeteilt:
+Die Docker-Anwendung ist in vier Anwendungsservices aufgeteilt:
 
 - `model-service`
   - führt die fachliche Spiellogik aus
@@ -32,17 +32,23 @@ Die Docker-Anwendung ist in drei Services aufgeteilt:
   - stellt die Weboberfläche bereit
   - liefert HTML, CSS und JavaScript aus
   - kommuniziert per HTTP mit dem `controller-service`
+- `stream-service`
+  - verarbeitet mehrzeilige Schachkommandos als Akka Reactive Stream
+  - stellt einen Kafka Producer und Consumer bereit
+  - konsumiert `tichess.commands` und publiziert Ergebnisse nach `tichess.events`
+  - kommuniziert per HTTP mit dem `controller-service`
 
 Datenfluss:
 
 ```text
 Browser -> view-service -> controller-service -> model-service
+DSL/Kafka -> stream-service -> controller-service -> model-service
 ```
 
 Persistenz:
 
-- Docker Compose startet PostgreSQL und MongoDB.
-- Standardmäßig verwendet der Controller in Docker `DB_TYPE=mongo`.
+- Docker Compose und Kubernetes starten MongoDB.
+- Der Controller verwendet in den Deployment-Setups `DB_TYPE=mongo`.
 - Der Spielstand wird unter der ID `default` gespeichert und beim Neustart wieder geladen.
 - Challenges werden beim Start aus den eingebauten Lichess-Fallbacks oder optional aus einer CSV-Datei geladen.
 
@@ -56,11 +62,25 @@ docker compose up --build
 
 Danach ist die Web-UI unter [http://localhost:8080](http://localhost:8080) erreichbar.
 
+Falls parallel der lokale k3d-Cluster läuft, ist Port `8080` bereits durch
+den k3d-Ingress belegt. Compose kann dann auf einem anderen Host-Port
+gestartet werden:
+
+```bash
+VIEW_HOST_PORT=8084 docker compose up --build -d
+```
+
+Die Compose-Web-UI ist in diesem Fall unter
+[http://localhost:8084](http://localhost:8084) erreichbar. Der interne
+Container-Port bleibt `8080`.
+
 Services und Ports:
 
 - `view-service`: `8080`
 - `model-service`: `8081`
 - `controller-service`: `8082`
+- `stream-service`: `8083`
+- `kafka`: `9092`
 - `postgres-db`: `5432`
 - `mongo-db`: `27017`
 
@@ -87,6 +107,176 @@ Stoppen inklusive Datenbank-Volumes:
 ```bash
 docker compose down -v
 ```
+
+## Reactive Streams und Kafka
+
+Die ausführliche Abgabedokumentation liegt unter
+[`docs/Abgabebericht-Reactive-Streams-Kafka.md`](docs/Abgabebericht-Reactive-Streams-Kafka.md).
+
+Direkte Source-Flow-Sink-Pipeline testen:
+
+```bash
+curl -H "Content-Type: text/plain" \
+  --data-binary @examples/chess-commands.dsl \
+  http://localhost:8083/api/stream/commands
+```
+
+Dieselben Kommandos an den Kafka Producer senden:
+
+```bash
+curl -H "Content-Type: text/plain" \
+  --data-binary @examples/chess-commands.dsl \
+  http://localhost:8083/api/kafka/commands
+```
+
+Komplette k3d-Demo:
+
+```bash
+./scripts/demo-stream-kafka.sh
+```
+
+## Lichess-Bot mit Docker Compose
+
+Der Bot wird über ein Compose-Profil gestartet, damit für den normalen Web-Stack
+kein Lichess-Token erforderlich ist:
+
+```bash
+export LICHESS_TOKEN=lip_your_token_here
+docker compose --profile bot up --build -d
+docker compose logs -f lichess-bot
+```
+
+Alternativ kann `.env.example` als Vorlage für eine lokale `.env` verwendet
+werden. `.env` ist aus Git ausgeschlossen. Der Bot läuft ohne interaktive
+Standardeingabe dauerhaft weiter und wird mit `docker compose down` sauber
+beendet.
+
+Optional können Syzygy-Tablebases eingebunden werden:
+
+```bash
+export SYZYGY_PATH=/absolute/path/to/tablebases
+docker compose --profile bot up --build -d
+```
+
+## NowChess-Turnierserver-Bot
+
+Zusätzlich zum Lichess-Bot kann TiChess gegen den NowChess-Turnierserver
+laufen. Die API wird aus dem öffentlichen `maichess/tournament-server`-Repo
+verwendet:
+
+- Registrierung: `POST /api/auth/register`
+- Turnierbeitritt: `POST /api/tournament/{id}/join`
+- Turnierstream: `GET /api/tournament/{id}/stream`
+- Spielstream: `GET /api/tournament/{id}/game/{gameId}/stream`
+- Zug senden: `POST /api/tournament/{id}/game/{gameId}/move/{uci}`
+
+Direkt lokal:
+
+```bash
+TOURNAMENT_ID=tournament_id_here sbt "run tournament"
+```
+
+Mit bereits vorhandenem Turnierserver-Token:
+
+```bash
+TOURNAMENT_SERVER_URL=https://st.nowchess.janis-eccarius.de \
+TOURNAMENT_ID=tournament_id_here \
+TOURNAMENT_TOKEN=jwt_from_tournament_server \
+sbt "run tournament"
+```
+
+Mit Docker Compose:
+
+```bash
+TOURNAMENT_ID=tournament_id_here \
+TOURNAMENT_TOKEN=jwt_from_tournament_server \
+docker compose --profile tournament up --build -d
+```
+
+Mit k3d oder k3s:
+
+```bash
+export TOURNAMENT_ID=tournament_id_here
+export TOURNAMENT_TOKEN=jwt_from_tournament_server
+export TOURNAMENT_SERVER_URL=https://st.nowchess.janis-eccarius.de
+./scripts/deploy-k3d.sh
+kubectl -n tichess logs -f deployment/tournament-bot
+```
+
+Falls `TOURNAMENT_TOKEN` fehlt, registriert sich der Bot einmalig mit
+`TOURNAMENT_BOT_NAME` und gibt den erzeugten Token im Log aus. Diesen Token
+sollte man anschließend als `TOURNAMENT_TOKEN` wiederverwenden.
+
+## Lokales Kubernetes mit k3d
+
+Voraussetzungen:
+
+- laufender Docker-Daemon
+- `kubectl`
+- `k3d`, unter macOS zum Beispiel mit `brew install k3d`
+
+Web-Stack bauen, Cluster erzeugen, Image importieren und deployen:
+
+```bash
+./scripts/deploy-k3d.sh
+```
+
+Danach ist TiChess unter [http://localhost:8080](http://localhost:8080)
+erreichbar.
+
+Den Bot im selben Cluster deployen:
+
+```bash
+export LICHESS_TOKEN=lip_your_token_here
+./scripts/deploy-k3d.sh
+kubectl -n tichess logs -f deployment/lichess-bot
+```
+
+Status und Aufräumen:
+
+```bash
+kubectl -n tichess get all
+k3d cluster delete tichess
+```
+
+Die Kubernetes-Dateien liegen unter `k8s/`:
+
+- `namespace.yaml`: eigener Namespace
+- `stack.yaml`: MongoDB, Model, Controller, View, Services und Ingress
+- `bot.yaml`: Lichess-Bot mit Token aus einem Kubernetes Secret
+- `k3d.yaml`: lokaler Cluster mit Portweiterleitung `8080 -> 80`
+
+## Deployment auf dem virtuellen Server
+
+Zielserver dieser Abgabe:
+
+```text
+141.37.74.150
+```
+
+Auf dem Server müssen Docker und k3s installiert sein. Nach dem Checkout des
+Repositories wird der Stack direkt auf dem Server gebaut und in die
+k3s-containerd-Registry importiert:
+
+```bash
+ssh <benutzer>@141.37.74.150
+cd TiChess
+export LICHESS_TOKEN=lip_your_token_here
+./scripts/deploy-k3s.sh
+```
+
+Anschließend:
+
+```bash
+sudo k3s kubectl -n tichess get pods
+sudo k3s kubectl -n tichess logs -f deployment/lichess-bot
+curl http://141.37.74.150/health
+```
+
+Die Weboberfläche wird über den von k3s mitgelieferten Traefik-Ingress auf
+[http://141.37.74.150](http://141.37.74.150) veröffentlicht. Der echte
+Lichess-Token wird ausschließlich als Kubernetes Secret angelegt und steht
+nicht in den Manifesten.
 
 ## Lokale Entwicklung
 
@@ -117,8 +307,8 @@ target/scala-3.3.4/scoverage-report/index.html
 Aktueller Stand:
 
 ```text
-Statement coverage: 100.00%
-Branch coverage:    100.00%
+Statement coverage: 99.18%
+Branch coverage:    99.26%
 ```
 
 ## Oberflächen
@@ -214,6 +404,7 @@ Wichtige Umgebungsvariablen:
 - `MODEL_SERVICE_PORT` Standard `8081`
 - `CONTROLLER_SERVICE_PORT` Standard `8082`
 - `VIEW_SERVICE_PORT` Standard `8080`
+- `STREAM_SERVICE_PORT` Standard `8083`
 - `MODEL_SERVICE_URL` Standard im Docker-Netzwerk `http://model-service:8081`
 - `CONTROLLER_SERVICE_URL` Standard im Docker-Netzwerk `http://controller-service:8082`
 - `DB_TYPE` entweder `mongo` oder `postgres`
@@ -222,6 +413,12 @@ Wichtige Umgebungsvariablen:
 - `DB_USER` Standard `postgres`
 - `DB_PASSWORD` Standard `password`
 - `LICHESS_PUZZLE_CSV` optionaler Pfad zu einer Lichess-Puzzle-CSV
+- `LICHESS_TOKEN` Token des Lichess-Bot-Kontos
+- `SYZYGY_PATH` optionaler Pfad zu Syzygy-Tablebases
+- `KAFKA_BOOTSTRAP_SERVERS` Standard lokal `localhost:9092`
+- `KAFKA_COMMANDS_TOPIC` Standard `tichess.commands`
+- `KAFKA_EVENTS_TOPIC` Standard `tichess.events`
+- `KAFKA_CONSUMER_GROUP` Standard `tichess-stream-service`
 
 ## HTTP-Endpunkte
 
@@ -238,8 +435,18 @@ Controller-Service:
 View-Service:
 
 - `GET /`
+- `GET /health`
 - `GET /api/view/game`
 - `POST /api/controller/update` als Proxy zur Controller-API
+
+Model- und Controller-Service stellen ebenfalls `GET /health` für
+Container- und Kubernetes-Probes bereit.
+
+Stream-Service:
+
+- `GET /health`
+- `POST /api/stream/commands`
+- `POST /api/kafka/commands`
 
 ## Projektstruktur
 

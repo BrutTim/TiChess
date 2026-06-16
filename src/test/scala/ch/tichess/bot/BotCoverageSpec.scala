@@ -1,5 +1,6 @@
 package ch.tichess.bot
 
+import ch.tichess.controller.AppState
 import ch.tichess.model.*
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -159,6 +160,31 @@ final class BotCoverageSpec extends AnyFunSuite:
     invalidMoveScript.toFile.setExecutable(true)
     val invalidProbe = SyzygyTablebase(tableDir.toString, invalidMoveScript.toString, scriptPath = "ignored", maxPieces = 3)
     assert(invalidProbe.probe(smallGame).isEmpty)
+  }
+
+  test("AlphaBetaBot prefers an equally winning Syzygy move that avoids repeating a prior position") {
+    val tableDir = Files.createTempDirectory("syzygy-repeat-test")
+    val probeScript = Files.createTempFile("syzygy-repeat-probe", ".sh")
+    Files.writeString(
+      probeScript,
+      """#!/bin/sh
+        |printf 'bestmove g5h5\n'
+        |printf 'wdl 2\n'
+        |printf 'dtz 1\n'
+        |printf 'move g5h5 wdl 2 dtz 4\n'
+        |printf 'move g5f5 wdl 2 dtz 4\n'
+        |""".stripMargin
+    )
+    probeScript.toFile.setExecutable(true)
+
+    val game = Fen.parse("8/6p1/8/6k1/8/6K1/8/8 b - - 14 78").toOption.get
+    val repeatedAfterBest = game.applyMove(Move(Pos(6, 4), Pos(7, 4))).toOption.get
+    val tablebase = SyzygyTablebase(tableDir.toString, probeScript.toString, scriptPath = "ignored", maxPieces = 3)
+    val bot = AlphaBetaBot(thinkTimeMs = 1L, openingDb = None, syzygyTablebase = Some(tablebase))
+    val state = AppState(game, startGame = repeatedAfterBest)
+
+    val chosen = Await.result(bot.chooseMove(state), 2.seconds)
+    assert(chosen == Right(Move(Pos(6, 4), Pos(5, 4))))
   }
 
   test("SyzygyTablebase configuration helpers cover env and default python choices") {

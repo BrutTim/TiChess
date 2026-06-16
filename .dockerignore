@@ -1,0 +1,12 @@
+.git
+.idea
+.bsp
+.metals
+.scala-build
+.vscode
+target
+venv
+test_out*.txt
+src/main/resources/3-4-5_pieces_Syzygy
+*.rtbw
+*.rtbz

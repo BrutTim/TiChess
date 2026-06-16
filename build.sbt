@@ -1,9 +1,11 @@
 ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / organization := "ch.tichess"
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / coverageExcludedFiles := ".*Main.*|.*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*ModelServer.*|.*ControllerServer.*|.*HttpModelService.*|.*ControllerHttpClient.*|.*ServiceConfig.*|.*bot/AlphaBetaBot.*|.*bot/lichess/.*|.*MongoGameDao.*|.*MongoChallengeDao.*"
+ThisBuild / coverageExcludedFiles := ".*Main.*|.*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*ModelServer.*|.*ControllerServer.*|.*HttpModelService.*|.*ControllerHttpClient.*|.*ServiceConfig.*|.*bot/AlphaBetaBot.*|.*bot/lichess/.*|.*streaming/Kafka.*|.*streaming/StreamServer.*|.*MongoGameDao.*|.*MongoChallengeDao.*"
+ThisBuild / assemblyRepeatableBuild := true
 
 lazy val javaFxVersion = "21.0.2"
+lazy val fatJar = sbtassembly.AssemblyPlugin.autoImport.assembly
 lazy val osName = sys.props("os.name").toLowerCase
 lazy val osArch = sys.props("os.arch").toLowerCase
 lazy val isArm64 = osArch.contains("aarch64") || osArch.contains("arm64")
@@ -42,6 +44,7 @@ lazy val root = (project in file("."))
       "com.typesafe.akka" %% "akka-stream" % "2.8.5",
       "com.typesafe.akka" %% "akka-http" % "10.5.3",
       "com.typesafe.akka" %% "akka-http-spray-json" % "10.5.3",
+      "com.typesafe.akka" %% "akka-stream-kafka" % "4.0.2",
       "com.typesafe.akka" %% "akka-stream-testkit" % "2.8.5" % Test,
       "com.typesafe.akka" %% "akka-http-testkit" % "10.5.3" % Test,
       "com.typesafe.akka" %% "akka-actor-testkit-typed" % "2.8.5" % Test,
@@ -55,6 +58,18 @@ lazy val root = (project in file("."))
       "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.11.5" % Test excludeAll(ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(organization = "org.scala-lang.modules")),
       "io.gatling" % "gatling-test-framework" % "3.11.5" % Test excludeAll(ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(organization = "org.scala-lang.modules"))
     ) ++ javaFxDependencies,
+    Compile / unmanagedResources / excludeFilter :=
+      GlobFilter("*.rtbw") || GlobFilter("*.rtbz") || HiddenFileFilter,
+    fatJar / assemblyJarName := "tichess.jar",
+    fatJar / test := {},
+    fatJar / assemblyMergeStrategy := {
+      case "module-info.class"                    => MergeStrategy.discard
+      case "version.conf"                         => MergeStrategy.first
+      case "application.conf" | "reference.conf" => MergeStrategy.concat
+      case PathList("META-INF", "services", _*)   => MergeStrategy.concat
+      case PathList("META-INF", _*)               => MergeStrategy.discard
+      case path                                   => (ThisBuild / assemblyMergeStrategy).value(path)
+    },
     Test / fork := true,
     Test / parallelExecution := false,
     Test / test := (Test / test).dependsOn(Compile / copyResources).value

@@ -1,20 +1,51 @@
 package ch.tichess.model
 
-final case class Board(pieces: Map[Pos, Piece]):
-  def pieceAt(pos: Pos): Option[Piece] = pieces.get(pos)
-  def isEmpty(pos: Pos): Boolean = !pieces.contains(pos)
+final class Board private (val pieces: Map[Pos, Piece], val bitboards: Bitboards):
+  def pieceAt(pos: Pos): Option[Piece] = bitboards.pieceAt(pos)
+  def isEmpty(pos: Pos): Boolean = (bitboards.occupied & Bitboards.mask(pos)) == 0L
   def allPieces: Map[Pos, Piece] = pieces
 
-  def removeAt(pos: Pos): Board = Board(pieces - pos)
+  def copy(pieces: Map[Pos, Piece] = this.pieces): Board = Board(pieces)
+
+  def removeAt(pos: Pos): Board =
+    pieces.get(pos) match
+      case None => this
+      case Some(piece) => Board.unsafe(pieces - pos, bitboards.remove(pos, piece))
+
+  def setAt(pos: Pos, piece: Piece): Board =
+    val withoutExisting =
+      pieces.get(pos) match
+        case Some(existing) => bitboards.remove(pos, existing)
+        case None           => bitboards
+    Board.unsafe(pieces.updated(pos, piece), withoutExisting.add(pos, piece))
 
   def movePiece(move: Move): Either[String, Board] =
     pieces.get(move.from) match
       case None => Left("No piece at source position.")
       case Some(p) =>
         val updated = pieces - move.from - move.to + (move.to -> p)
-        Right(Board(updated))
+        val captured = pieces.get(move.to)
+        Right(Board.unsafe(updated, bitboards.move(move.from, move.to, p, captured)))
+
+  override def equals(other: Any): Boolean =
+    other match
+      case board: Board => pieces == board.pieces
+      case _            => false
+
+  override def hashCode(): Int = pieces.hashCode()
+
+  override def toString: String = s"Board($pieces)"
 
 object Board:
+  def apply(pieces: Map[Pos, Piece]): Board =
+    Board(pieces, Bitboards.fromPieces(pieces))
+
+  private[model] def unsafe(pieces: Map[Pos, Piece], bitboards: Bitboards): Board =
+    new Board(pieces, bitboards)
+
+  private def apply(pieces: Map[Pos, Piece], bitboards: Bitboards): Board =
+    new Board(pieces, bitboards)
+
   def empty: Board = Board(Map.empty)
 
   def initial: Board =

@@ -5,11 +5,14 @@ import ch.tichess.view.ConsoleView
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import ch.tichess.bot.lichess.OutgoingChallenge
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.duration.Duration
 
 object Main:
   def main(args: Array[String]): Unit =
-    if args.contains("bot") then
+    if args.contains("tournament") then
+      startTournamentMode(args)
+    else if args.contains("bot") then
       startBotMode(args)
     else
       mainWith(ConsoleApp.LiveStdIO, args)
@@ -43,9 +46,45 @@ object Main:
       }
     }
     
-    // Keep application alive
-    scala.io.StdIn.readLine("Bot is running. Press ENTER to stop...\n")
-    system.terminate()
+    sys.addShutdownHook {
+      system.terminate()
+    }
+    println("Bot is running. Stop it with SIGTERM or CTRL+C.")
+    Await.result(system.whenTerminated, Duration.Inf)
+
+  private def startTournamentMode(args: Array[String]): Unit =
+    val tournamentId = sys.env.getOrElse("TOURNAMENT_ID", {
+      System.err.println("Error: TOURNAMENT_ID environment variable is not set.")
+      sys.exit(1)
+    })
+    val baseUrl = sys.env.getOrElse("TOURNAMENT_SERVER_URL", "https://st.nowchess.janis-eccarius.de")
+    val botName = sys.env.getOrElse("TOURNAMENT_BOT_NAME", "TiChess")
+    val join = sys.env.get("TOURNAMENT_JOIN").forall(!_.equalsIgnoreCase("false"))
+
+    implicit val system: ActorSystem[Nothing] = ActorSystem(Behaviors.empty, "TournamentBotSystem")
+    implicit val ec: ExecutionContext = system.executionContext
+
+    val tokenFuture =
+      sys.env.get("TOURNAMENT_TOKEN") match
+        case Some(token) if token.nonEmpty => scala.concurrent.Future.successful(token)
+        case _ =>
+          ch.tichess.bot.tournament.TournamentClient.registerBot(baseUrl, botName).map { registered =>
+            println(s"Registered tournament bot '${botName}' with id ${registered.id}.")
+            println(s"Set TOURNAMENT_TOKEN='${registered.token}' to reuse this identity.")
+            registered.token
+          }
+
+    val token = Await.result(tokenFuture, Duration.Inf)
+    val client = new ch.tichess.bot.tournament.TournamentClient(baseUrl, token)
+    val bot = new ch.tichess.bot.AlphaBetaBot(10000L, Some(Controller.openingDb))
+    val runner = new ch.tichess.bot.tournament.TournamentBotRunner(client, tournamentId, bot)
+    runner.start(join)
+
+    sys.addShutdownHook {
+      system.terminate()
+    }
+    println("Tournament bot is running. Stop it with SIGTERM or CTRL+C.")
+    Await.result(system.whenTerminated, Duration.Inf)
 
   private def parseOutgoingChallenge(args: List[String]): Option[OutgoingChallenge] =
     val challengeIndex = args.indexWhere(arg => arg == "challenge" || arg == "--challenge")

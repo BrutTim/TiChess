@@ -44,7 +44,8 @@ def main():
             if not legal_moves:
                 return 1
 
-            best_move = max(legal_moves, key=lambda move: move_score(board, tablebase, move))
+            scored_moves = [(move, move_score(board, tablebase, move)) for move in legal_moves]
+            best_move = max(scored_moves, key=lambda item: item[1])[0]
             root_wdl = tablebase.probe_wdl(board)
             root_dtz = tablebase.probe_dtz(board)
     except chess.syzygy.MissingTableError as error:
@@ -54,6 +55,13 @@ def main():
     print(f"bestmove {best_move.uci()}")
     print(f"wdl {root_wdl}")
     print(f"dtz {root_dtz}")
+    for move, (wdl, dtz_score) in scored_moves:
+        board.push(move)
+        try:
+            our_dtz = -tablebase.probe_dtz(board)
+        finally:
+            board.pop()
+        print(f"move {move.uci()} wdl {wdl} dtz {our_dtz}")
     return 0
 
 

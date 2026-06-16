@@ -2,6 +2,7 @@ package ch.tichess.view
 
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import ch.tichess.controller.persistence.ChallengeRecord
+import ch.tichess.streaming.{KafkaPublishResponse, StreamCommandResult}
 import spray.json.{DefaultJsonProtocol, RootJsonFormat}
 
 final case class MoveRequest(fen: String, algebraicMove: String) // e.g. "e2 e4" or "e7 e8 q"
@@ -38,3 +39,6 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol:
   implicit val challengeRecordListFormat: RootJsonFormat[List[ChallengeRecord]] = listFormat[ChallengeRecord]
 
   implicit val stateResponseFormat: RootJsonFormat[StateResponse] = jsonFormat15(StateResponse.apply)
+  implicit val streamCommandResultFormat: RootJsonFormat[StreamCommandResult] = jsonFormat6(StreamCommandResult.apply)
+  implicit val streamCommandResultListFormat: RootJsonFormat[List[StreamCommandResult]] = listFormat[StreamCommandResult]
+  implicit val kafkaPublishResponseFormat: RootJsonFormat[KafkaPublishResponse] = jsonFormat3(KafkaPublishResponse.apply)
