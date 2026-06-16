@@ -151,6 +151,22 @@ services:
     volumes:
       - ${SYZYGY_PATH:-./.empty-syzygy}:${SYZYGY_PATH:-/tablebases}:ro
 
+  tournament-bot:
+    <<: *tichess-service
+    profiles: ["tournament"]
+    environment:
+      MAIN_CLASS: ch.tichess.Main
+      APP_ARGS: tournament
+      TOURNAMENT_SERVER_URL: ${TOURNAMENT_SERVER_URL:-https://st.nowchess.janis-eccarius.de}
+      TOURNAMENT_ID: ${TOURNAMENT_ID:-}
+      TOURNAMENT_TOKEN: ${TOURNAMENT_TOKEN:-}
+      TOURNAMENT_BOT_NAME: ${TOURNAMENT_BOT_NAME:-TiChess}
+      TOURNAMENT_JOIN: ${TOURNAMENT_JOIN:-true}
+      JAVA_OPTS: -XX:MaxRAMPercentage=75
+      SYZYGY_PATH: ${SYZYGY_PATH:-}
+    volumes:
+      - ${SYZYGY_PATH:-./.empty-syzygy}:${SYZYGY_PATH:-/tablebases}:ro
+
 volumes:
   mongo-data:
   kafka-data:

@@ -158,6 +158,55 @@ export SYZYGY_PATH=/absolute/path/to/tablebases
 docker compose --profile bot up --build -d
 ```
 
+## NowChess-Turnierserver-Bot
+
+Zusätzlich zum Lichess-Bot kann TiChess gegen den NowChess-Turnierserver
+laufen. Die API wird aus dem öffentlichen `maichess/tournament-server`-Repo
+verwendet:
+
+- Registrierung: `POST /api/auth/register`
+- Turnierbeitritt: `POST /api/tournament/{id}/join`
+- Turnierstream: `GET /api/tournament/{id}/stream`
+- Spielstream: `GET /api/tournament/{id}/game/{gameId}/stream`
+- Zug senden: `POST /api/tournament/{id}/game/{gameId}/move/{uci}`
+
+Direkt lokal:
+
+```bash
+TOURNAMENT_ID=tournament_id_here sbt "run tournament"
+```
+
+Mit bereits vorhandenem Turnierserver-Token:
+
+```bash
+TOURNAMENT_SERVER_URL=https://st.nowchess.janis-eccarius.de \
+TOURNAMENT_ID=tournament_id_here \
+TOURNAMENT_TOKEN=jwt_from_tournament_server \
+sbt "run tournament"
+```
+
+Mit Docker Compose:
+
+```bash
+TOURNAMENT_ID=tournament_id_here \
+TOURNAMENT_TOKEN=jwt_from_tournament_server \
+docker compose --profile tournament up --build -d
+```
+
+Mit k3d oder k3s:
+
+```bash
+export TOURNAMENT_ID=tournament_id_here
+export TOURNAMENT_TOKEN=jwt_from_tournament_server
+export TOURNAMENT_SERVER_URL=https://st.nowchess.janis-eccarius.de
+./scripts/deploy-k3d.sh
+kubectl -n tichess logs -f deployment/tournament-bot
+```
+
+Falls `TOURNAMENT_TOKEN` fehlt, registriert sich der Bot einmalig mit
+`TOURNAMENT_BOT_NAME` und gibt den erzeugten Token im Log aus. Diesen Token
+sollte man anschließend als `TOURNAMENT_TOKEN` wiederverwenden.
+
 ## Lokales Kubernetes mit k3d
 
 Voraussetzungen:

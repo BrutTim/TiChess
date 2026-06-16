@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tournament-bot
+  namespace: tichess
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tournament-bot
+  template:
+    metadata:
+      labels:
+        app: tournament-bot
+    spec:
+      containers:
+        - name: tournament-bot
+          image: tichess:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MAIN_CLASS
+              value: ch.tichess.Main
+            - name: APP_ARGS
+              value: tournament
+            - name: TOURNAMENT_SERVER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tournament-bot
+                  key: server-url
+            - name: TOURNAMENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tournament-bot
+                  key: tournament-id
+            - name: TOURNAMENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tournament-bot
+                  key: token
+                  optional: true
+            - name: TOURNAMENT_BOT_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: tournament-bot
+                  key: bot-name
+            - name: TOURNAMENT_JOIN
+              value: "true"
+            - name: JAVA_OPTS
+              value: -XX:MaxRAMPercentage=75
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+      terminationGracePeriodSeconds: 30

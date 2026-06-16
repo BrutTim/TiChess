@@ -17,6 +17,7 @@ metadata:
   namespace: tichess
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1200
   strategy:
     type: Recreate
   selector:
@@ -73,6 +74,7 @@ metadata:
   namespace: tichess
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1200
   strategy:
     type: Recreate
   selector:
@@ -152,6 +154,7 @@ metadata:
   namespace: tichess
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels:
       app: model-service
@@ -213,6 +216,7 @@ metadata:
   namespace: tichess
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels:
       app: controller-service
@@ -292,6 +296,7 @@ metadata:
   namespace: tichess
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels:
       app: view-service
@@ -355,6 +360,7 @@ metadata:
   namespace: tichess
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels:
       app: stream-service
