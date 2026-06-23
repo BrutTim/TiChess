@@ -24,6 +24,7 @@ lazy val javaFxPlatform =
 
 lazy val javaFxModules = Seq("base", "graphics", "controls", "fxml")
 lazy val includeJavaFx = sys.env.get("INCLUDE_JAVAFX").forall(_.toLowerCase != "false")
+lazy val sparkJavaOptions = Seq("--add-exports=java.base/sun.nio.ch=ALL-UNNAMED")
 lazy val javaFxDependencies =
   if (includeJavaFx)
     javaFxModules.map { m =>
@@ -38,6 +39,7 @@ lazy val root = (project in file("."))
     libraryDependencies ++= Seq(
       "org.scalafx" %% "scalafx" % "21.0.0-R32",
       "org.scala-lang.modules" %% "scala-parser-combinators" % "2.4.0",
+      "org.scala-lang.modules" %% "scala-xml" % "2.3.0",
       "com.lihaoyi" %% "fastparse" % "3.1.1",
       "org.scalatest" %% "scalatest" % "3.2.19" % Test,
       "com.typesafe.akka" %% "akka-actor-typed" % "2.8.5",
@@ -45,6 +47,18 @@ lazy val root = (project in file("."))
       "com.typesafe.akka" %% "akka-http" % "10.5.3",
       "com.typesafe.akka" %% "akka-http-spray-json" % "10.5.3",
       "com.typesafe.akka" %% "akka-stream-kafka" % "4.0.2",
+      ("org.apache.spark" %% "spark-sql" % "3.5.5")
+        .cross(CrossVersion.for3Use2_13)
+        .excludeAll(
+          ExclusionRule(organization = "org.scala-lang.modules", name = "scala-parser-combinators_2.13"),
+          ExclusionRule(organization = "org.scala-lang.modules", name = "scala-xml_2.13")
+        ),
+      ("org.apache.spark" %% "spark-sql-kafka-0-10" % "3.5.5")
+        .cross(CrossVersion.for3Use2_13)
+        .excludeAll(
+          ExclusionRule(organization = "org.scala-lang.modules", name = "scala-parser-combinators_2.13"),
+          ExclusionRule(organization = "org.scala-lang.modules", name = "scala-xml_2.13")
+        ),
       "com.typesafe.akka" %% "akka-stream-testkit" % "2.8.5" % Test,
       "com.typesafe.akka" %% "akka-http-testkit" % "10.5.3" % Test,
       "com.typesafe.akka" %% "akka-actor-testkit-typed" % "2.8.5" % Test,
@@ -58,6 +72,13 @@ lazy val root = (project in file("."))
       "io.gatling.highcharts" % "gatling-charts-highcharts" % "3.11.5" % Test excludeAll(ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(organization = "org.scala-lang.modules")),
       "io.gatling" % "gatling-test-framework" % "3.11.5" % Test excludeAll(ExclusionRule(organization = "com.typesafe.akka"), ExclusionRule(organization = "org.scala-lang.modules"))
     ) ++ javaFxDependencies,
+    dependencyOverrides ++= Seq(
+      "com.fasterxml.jackson.core" % "jackson-annotations" % "2.15.2",
+      "com.fasterxml.jackson.core" % "jackson-core" % "2.15.2",
+      "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2",
+      ("com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2")
+        .cross(CrossVersion.for3Use2_13)
+    ),
     Compile / unmanagedResources / excludeFilter :=
       GlobFilter("*.rtbw") || GlobFilter("*.rtbz") || HiddenFileFilter,
     fatJar / assemblyJarName := "tichess.jar",
@@ -71,6 +92,9 @@ lazy val root = (project in file("."))
       case path                                   => (ThisBuild / assemblyMergeStrategy).value(path)
     },
     Test / fork := true,
+    Test / javaOptions ++= sparkJavaOptions,
+    Compile / run / fork := true,
+    Compile / run / javaOptions ++= sparkJavaOptions,
     Test / parallelExecution := false,
     Test / test := (Test / test).dependsOn(Compile / copyResources).value
   )
