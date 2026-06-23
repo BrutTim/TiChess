@@ -79,6 +79,7 @@ lazy val root = (project in file("."))
       ("com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2")
         .cross(CrossVersion.for3Use2_13)
     ),
+    excludeDependencies += "commons-logging" % "commons-logging",
     Compile / unmanagedResources / excludeFilter :=
       GlobFilter("*.rtbw") || GlobFilter("*.rtbz") || HiddenFileFilter,
     fatJar / assemblyJarName := "tichess.jar",
@@ -86,7 +87,9 @@ lazy val root = (project in file("."))
     fatJar / assemblyMergeStrategy := {
       case "module-info.class"                    => MergeStrategy.discard
       case "version.conf"                         => MergeStrategy.first
+      case "arrow-git.properties"                 => MergeStrategy.first
       case "application.conf" | "reference.conf" => MergeStrategy.concat
+      case PathList("google", "protobuf", _*)     => MergeStrategy.first
       case PathList("META-INF", "services", _*)   => MergeStrategy.concat
       case PathList("META-INF", _*)               => MergeStrategy.discard
       case path                                   => (ThisBuild / assemblyMergeStrategy).value(path)
