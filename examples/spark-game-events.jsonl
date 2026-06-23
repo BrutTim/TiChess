@@ -1,0 +1,7 @@
+{"line":1,"input":"new","accepted":true,"success":true,"message":"Neues Spiel gestartet.","fen":"start"}
+{"line":2,"input":"e2 e4","accepted":true,"success":true,"message":"Move played.","fen":"fen-after-e4"}
+{"line":3,"input":"e7 e5","accepted":true,"success":true,"message":"Move played.","fen":"fen-after-e5"}
+{"line":4,"input":"resign","accepted":true,"success":true,"message":"Black gibt auf. White gewinnt!","fen":"fen-white-wins"}
+{"line":5,"input":"new","accepted":true,"success":true,"message":"Neues Spiel gestartet.","fen":"start"}
+{"line":6,"input":"resign","accepted":true,"success":true,"message":"White gibt auf. Black gewinnt!","fen":"fen-black-wins"}
+{"line":7,"input":"bad command","accepted":false,"success":false,"message":"Invalid command.","fen":null}

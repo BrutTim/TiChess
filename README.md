@@ -135,6 +135,23 @@ Komplette k3d-Demo:
 ./scripts/demo-stream-kafka.sh
 ```
 
+## Spark Analytics
+
+Die Spark-Abgabedokumentation liegt unter
+[`docs/Abgabebericht-Spark.md`](docs/Abgabebericht-Spark.md).
+
+Datei-basierte Auswertung starten:
+
+```bash
+sbt "runMain ch.tichess.analytics.ChessSparkAnalytics file examples/spark-game-events.jsonl"
+```
+
+Kafka-Stream aus dem bestehenden Topic `tichess.events` lesen:
+
+```bash
+sbt "runMain ch.tichess.analytics.ChessSparkAnalytics kafka localhost:9092 tichess.events"
+```
+
 ## Lichess-Bot mit Docker Compose
 
 Der Bot wird über ein Compose-Profil gestartet, damit für den normalen Web-Stack
