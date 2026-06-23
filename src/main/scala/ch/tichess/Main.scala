@@ -57,7 +57,7 @@ object Main:
       System.err.println("Error: TOURNAMENT_ID environment variable is not set.")
       sys.exit(1)
     })
-    val baseUrl = sys.env.getOrElse("TOURNAMENT_SERVER_URL", "https://st.nowchess.janis-eccarius.de")
+    val baseUrl = sys.env.getOrElse("TOURNAMENT_SERVER_URL", "https://tournament.staging.maichess.berger-software.com")
     val botName = sys.env.getOrElse("TOURNAMENT_BOT_NAME", "TiChess")
     val join = sys.env.get("TOURNAMENT_JOIN").forall(!_.equalsIgnoreCase("false"))
 

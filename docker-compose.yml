@@ -158,7 +158,7 @@ services:
     environment:
       MAIN_CLASS: ch.tichess.Main
       APP_ARGS: tournament
-      TOURNAMENT_SERVER_URL: ${TOURNAMENT_SERVER_URL:-https://st.nowchess.janis-eccarius.de}
+      TOURNAMENT_SERVER_URL: ${TOURNAMENT_SERVER_URL:-https://tournament.staging.maichess.berger-software.com}
       TOURNAMENT_ID: ${TOURNAMENT_ID:-}
       TOURNAMENT_TOKEN: ${TOURNAMENT_TOKEN:-}
       TOURNAMENT_BOT_NAME: ${TOURNAMENT_BOT_NAME:-TiChess}

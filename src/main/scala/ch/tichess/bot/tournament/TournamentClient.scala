@@ -3,7 +3,7 @@ package ch.tichess.bot.tournament
 import akka.actor.typed.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.*
-import akka.http.scaladsl.model.headers.{Accept, Authorization, OAuth2BearerToken}
+import akka.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken, RawHeader}
 import akka.stream.scaladsl.{Framing, Source}
 import akka.util.ByteString
 import spray.json.*
@@ -14,7 +14,7 @@ import scala.concurrent.duration.*
 final case class TournamentRegisterRequest(name: String, isBot: Boolean)
 final case class TournamentRegisterResponse(id: String, token: String)
 final case class TournamentOk(ok: Boolean)
-final case class TournamentClock(whiteTime: Double, blackTime: Double)
+final case class TournamentClock(whiteTime: Double, blackTime: Double, increment: Option[Double] = None)
 final case class TournamentEvent(`type`: String, round: Option[Int] = None, gameId: Option[String] = None, color: Option[String] = None)
 final case class TournamentGameEvent(
     `type`: String,
@@ -31,14 +31,30 @@ trait TournamentJsonProtocol extends DefaultJsonProtocol:
   implicit val registerRequestFormat: RootJsonFormat[TournamentRegisterRequest] = jsonFormat2(TournamentRegisterRequest.apply)
   implicit val registerResponseFormat: RootJsonFormat[TournamentRegisterResponse] = jsonFormat2(TournamentRegisterResponse.apply)
   implicit val okFormat: RootJsonFormat[TournamentOk] = jsonFormat1(TournamentOk.apply)
-  implicit val clockFormat: RootJsonFormat[TournamentClock] = jsonFormat2(TournamentClock.apply)
+  implicit object clockFormat extends RootJsonFormat[TournamentClock]:
+    override def write(clock: TournamentClock): JsValue =
+      JsObject(
+        Map(
+          "whiteTime" -> JsNumber(clock.whiteTime),
+          "blackTime" -> JsNumber(clock.blackTime)
+        ) ++ clock.increment.map(value => "increment" -> JsNumber(value))
+      )
+
+    override def read(json: JsValue): TournamentClock =
+      val fields = json.asJsObject.fields
+      TournamentClock(
+        whiteTime = fields("whiteTime").convertTo[Double],
+        blackTime = fields("blackTime").convertTo[Double],
+        increment = fields.get("increment").map(_.convertTo[Double])
+      )
+
   implicit val tournamentEventFormat: RootJsonFormat[TournamentEvent] = jsonFormat4(TournamentEvent.apply)
   implicit val gameEventFormat: RootJsonFormat[TournamentGameEvent] = jsonFormat8(TournamentGameEvent.apply)
 
 class TournamentClient(baseUrl: String, token: String)(implicit system: ActorSystem[?], ec: ExecutionContext) extends TournamentJsonProtocol:
   private val cleanBaseUrl = baseUrl.stripSuffix("/")
   private val authHeader = Authorization(OAuth2BearerToken(token))
-  private val ndjsonAccept = Accept(MediaTypes.`application/json`)
+  private val ndjsonAccept = RawHeader("Accept", "application/x-ndjson")
 
   def joinTournament(tournamentId: String): Future[Unit] =
     val request = HttpRequest(

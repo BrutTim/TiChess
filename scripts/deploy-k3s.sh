@@ -22,7 +22,7 @@ fi
 
 if [[ -n "${TOURNAMENT_ID:-}" ]]; then
   sudo k3s kubectl -n tichess create secret generic tournament-bot \
-    --from-literal=server-url="${TOURNAMENT_SERVER_URL:-https://st.nowchess.janis-eccarius.de}" \
+    --from-literal=server-url="${TOURNAMENT_SERVER_URL:-https://tournament.staging.maichess.berger-software.com}" \
     --from-literal=tournament-id="$TOURNAMENT_ID" \
     --from-literal=token="${TOURNAMENT_TOKEN:-}" \
     --from-literal=bot-name="${TOURNAMENT_BOT_NAME:-TiChess}" \

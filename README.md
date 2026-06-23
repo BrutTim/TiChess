@@ -196,7 +196,7 @@ TOURNAMENT_ID=tournament_id_here sbt "run tournament"
 Mit bereits vorhandenem Turnierserver-Token:
 
 ```bash
-TOURNAMENT_SERVER_URL=https://st.nowchess.janis-eccarius.de \
+TOURNAMENT_SERVER_URL=https://tournament.staging.maichess.berger-software.com \
 TOURNAMENT_ID=tournament_id_here \
 TOURNAMENT_TOKEN=jwt_from_tournament_server \
 sbt "run tournament"
@@ -215,7 +215,7 @@ Mit k3d oder k3s:
 ```bash
 export TOURNAMENT_ID=tournament_id_here
 export TOURNAMENT_TOKEN=jwt_from_tournament_server
-export TOURNAMENT_SERVER_URL=https://st.nowchess.janis-eccarius.de
+export TOURNAMENT_SERVER_URL=https://tournament.staging.maichess.berger-software.com
 ./scripts/deploy-k3d.sh
 kubectl -n tichess logs -f deployment/tournament-bot
 ```
