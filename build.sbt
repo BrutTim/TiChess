@@ -1,7 +1,7 @@
 ThisBuild / scalaVersion := "3.3.4"
 ThisBuild / organization := "ch.tichess"
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / coverageExcludedFiles := ".*Main.*|.*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*ModelServer.*|.*ControllerServer.*|.*HttpModelService.*|.*ControllerHttpClient.*|.*ServiceConfig.*|.*bot/AlphaBetaBot.*|.*bot/lichess/.*|.*streaming/Kafka.*|.*streaming/StreamServer.*|.*MongoGameDao.*|.*MongoChallengeDao.*"
+ThisBuild / coverageExcludedFiles := ".*Main.*|.*GuiMain|.*FastParseParsers.*|.*GuiViewAdapter.*|.*RestServer.*|.*ModelServer.*|.*ControllerServer.*|.*HttpModelService.*|.*ControllerHttpClient.*|.*ServiceConfig.*|.*bot/AlphaBetaBot.*|.*bot/lichess/.*|.*streaming/Kafka.*|.*streaming/StreamServer.*|.*analytics/ChessSparkAnalytics.*|.*analytics/GameEventPublisher.*|.*analytics/StatisticsDao.*|.*MongoGameDao.*|.*MongoChallengeDao.*"
 ThisBuild / assemblyRepeatableBuild := true
 
 lazy val javaFxVersion = "21.0.2"
@@ -80,6 +80,7 @@ lazy val root = (project in file("."))
         .cross(CrossVersion.for3Use2_13)
     ),
     excludeDependencies += "commons-logging" % "commons-logging",
+    excludeDependencies += "org.apache.logging.log4j" % "log4j-slf4j2-impl",
     Compile / unmanagedResources / excludeFilter :=
       GlobFilter("*.rtbw") || GlobFilter("*.rtbz") || HiddenFileFilter,
     fatJar / assemblyJarName := "tichess.jar",
@@ -97,6 +98,7 @@ lazy val root = (project in file("."))
     Test / fork := true,
     Test / javaOptions ++= sparkJavaOptions,
     Compile / run / fork := true,
+    Compile / exportJars := true,
     Compile / run / javaOptions ++= sparkJavaOptions,
     Test / parallelExecution := false,
     Test / test := (Test / test).dependsOn(Compile / copyResources).value

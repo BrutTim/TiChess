@@ -4,10 +4,12 @@ import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives.*
-import ch.tichess.controller.Controller
+import ch.tichess.analytics.*
+import ch.tichess.controller.{Command, Controller}
 import ch.tichess.model.Fen
 import ch.tichess.view.{CommandRequest, CommandResponse, JsonSupport}
 
+import java.util.UUID
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.Duration
@@ -23,19 +25,28 @@ object ControllerServer extends JsonSupport:
     val modelServiceUrl = ServiceConfig.url("MODEL_SERVICE_URL", "http://localhost:8081")
     val modelService: ModelService = new HttpModelService(modelServiceUrl)
     val port = ServiceConfig.port("CONTROLLER_SERVICE_PORT", 8082)
+    val kafkaBootstrap = sys.env.getOrElse("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    val gameEventsTopic = sys.env.getOrElse("KAFKA_GAME_EVENTS_TOPIC", "tichess.game-events")
+    val eventPublisher = new KafkaGameEventPublisher(kafkaBootstrap, gameEventsTopic)
 
     val dbType = sys.env.getOrElse("DB_TYPE", "postgres")
     
-    val (dao, challengeDao): (ch.tichess.controller.persistence.GameDao, ch.tichess.controller.persistence.ChallengeDao) = if (dbType == "mongo") {
+    val (dao, challengeDao, statisticsDao): (
+        ch.tichess.controller.persistence.GameDao,
+        ch.tichess.controller.persistence.ChallengeDao,
+        StatisticsDao
+    ) = if (dbType == "mongo") {
       val mongoUri = sys.env.getOrElse("MONGO_URI", "mongodb://localhost:27017")
       import org.mongodb.scala._
       val mongoClient = MongoClient(mongoUri)
       val database = mongoClient.getDatabase("tichess")
       val collection = database.getCollection("games")
       val challengeCollection = database.getCollection("challenges")
+      val statisticsCollection = database.getCollection("player_statistics")
       (
         new ch.tichess.controller.persistence.mongo.MongoGameDao(collection),
-        new ch.tichess.controller.persistence.mongo.MongoChallengeDao(challengeCollection)
+        new ch.tichess.controller.persistence.mongo.MongoChallengeDao(challengeCollection),
+        new MongoStatisticsDao(statisticsCollection)
       )
     } else {
       val dbUrl = sys.env.getOrElse("DB_URL", "jdbc:postgresql://postgres-db:5432/tichess")
@@ -49,12 +60,13 @@ object ControllerServer extends JsonSupport:
       // Init schema
       Await.result(slickDao.initSchema(), Duration.Inf)
       Await.result(slickChallengeDao.initSchema(), Duration.Inf)
-      (slickDao, slickChallengeDao)
+      (slickDao, slickChallengeDao, EmptyStatisticsDao)
     }
     Await.result(seedChallenges(challengeDao, sys.env.get("LICHESS_PUZZLE_CSV")), Duration.Inf)
 
     // Load initial state
     var appState = Await.result(loadStateFromDb(dao), Duration.Inf)
+    var currentGameId = UUID.randomUUID().toString
 
     val route =
       concat(
@@ -70,10 +82,27 @@ object ControllerServer extends JsonSupport:
                 entity(as[CommandRequest]) { req =>
                   onComplete(modelServiceReady(modelService, appState, req.input, challengeDao)) {
                     case Success(res) =>
+                      val previousState = appState
                       appState = res.state
+                      if Command.parse(req.input).contains(ch.tichess.controller.Command.NewGame) then
+                        currentGameId = UUID.randomUUID().toString
                       // Save state asynchronously
                       saveStateToDb(dao, appState)
-                      complete(CommandResponse(success = true, res.message, Some(Fen.encode(res.game)), res.quit))
+                      GameEventFactory
+                        .create(currentGameId, req.input, previousState, appState, res.message)
+                        .foreach { event =>
+                          eventPublisher.publish(event).failed.foreach { error =>
+                            system.log.error(s"Could not publish game event ${event.eventId}", error)
+                          }
+                        }
+                      complete(
+                        CommandResponse(
+                          success = true,
+                          res.message,
+                          Some(Fen.encode(res.game)),
+                          res.quit
+                        )
+                      )
                     case Failure(ex) =>
                       complete(CommandResponse(success = false, Some(ex.getMessage), None, false))
                   }
@@ -87,6 +116,12 @@ object ControllerServer extends JsonSupport:
                 },
                 path("challenges") {
                   complete(List.empty[ch.tichess.controller.persistence.ChallengeRecord])
+                },
+                path("statistics") {
+                  onComplete(statisticsDao.list()) {
+                    case Success(statistics) => complete(statistics.toList)
+                    case Failure(error)      => failWith(error)
+                  }
                 }
               )
             }
@@ -96,6 +131,7 @@ object ControllerServer extends JsonSupport:
 
     Http().newServerAt("0.0.0.0", port).bind(route)
     println(s"Controller service online at http://localhost:$port/")
+    println(s"Game events: controller -> $gameEventsTopic")
     Await.result(system.whenTerminated, Duration.Inf)
 
   private def modelServiceReady(

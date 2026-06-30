@@ -232,6 +232,14 @@ spec:
             - sh
             - -c
             - until mongo "mongodb://mongo:27017/admin" --quiet --eval "db.adminCommand('ping').ok" >/dev/null; do sleep 2; done
+        - name: create-game-events-topic
+          image: apache/kafka:3.9.1
+          command:
+            - sh
+            - -c
+            - |
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do sleep 2; done
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic tichess.game-events --partitions 1 --replication-factor 1
       containers:
         - name: controller-service
           image: tichess:local
@@ -247,6 +255,10 @@ spec:
               value: mongo
             - name: MONGO_URI
               value: mongodb://mongo:27017
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: KAFKA_GAME_EVENTS_TOPIC
+              value: tichess.game-events
             - name: JAVA_OPTS
               value: -XX:MaxRAMPercentage=75
           ports:
@@ -379,6 +391,7 @@ spec:
               until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do sleep 2; done
               /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic tichess.commands --partitions 1 --replication-factor 1
               /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic tichess.events --partitions 1 --replication-factor 1
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic tichess.game-events --partitions 1 --replication-factor 1
       containers:
         - name: stream-service
           image: tichess:local
@@ -438,6 +451,51 @@ spec:
     - name: http
       port: 8083
       targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-analytics
+  namespace: tichess
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 1200
+  selector:
+    matchLabels:
+      app: spark-analytics
+  template:
+    metadata:
+      labels:
+        app: spark-analytics
+    spec:
+      initContainers:
+        - name: wait-for-dependencies
+          image: apache/kafka:3.9.1
+          command:
+            - sh
+            - -c
+            - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic tichess.game-events >/dev/null 2>&1; do sleep 2; done
+      containers:
+        - name: spark-analytics
+          image: tichess:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MAIN_CLASS
+              value: ch.tichess.analytics.ChessSparkAnalytics
+            - name: APP_ARGS
+              value: kafka kafka:9092 tichess.game-events
+            - name: MONGO_URI
+              value: mongodb://mongo:27017
+            - name: SPARK_CHECKPOINT_LOCATION
+              value: /tmp/tichess-spark-checkpoint
+            - name: JAVA_OPTS
+              value: --add-exports=java.base/sun.nio.ch=ALL-UNNAMED -XX:MaxRAMPercentage=75
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              memory: 1536Mi
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

@@ -2,97 +2,154 @@
 
 ## 1. Ziel
 
-TiChess wurde um eine Spark-Auswertung fuer die bereits vorhandenen
-Stream-/Kafka-Ergebnisse erweitert. Spark liest Ereignisse im Format von
-`StreamCommandResult` und berechnet daraus einfache Spielmetriken:
+TiChess verwendet Spark fuer eine dauerhafte White/Black-Bestenliste.
+Ausgewertet werden ausschliesslich abgeschlossene Partien:
 
-- Anzahl erfolgreicher und fehlgeschlagener Events
-- Anzahl Siege pro Gewinnerfarbe
-- Remis-Zahl
-- Score pro Gewinnerfarbe
+- Spiele
+- Siege
+- Remis
+- Niederlagen
+- Punkte
 
-Der Score ist bewusst einfach gehalten:
-
-- Sieg: 3 Punkte
-- Remis: 1 Punkt
-- normales erfolgreiches Kommando: 0 Punkte
-- fehlgeschlagenes Kommando: -1 Punkt
-
-Da TiChess aktuell keine benannten Spieler in den Stream-Events fuehrt,
-verwendet die Auswertung `White` und `Black` als Spieler-Metrik.
+Ein Sieg ergibt drei Punkte, ein Remis einen Punkt und eine Niederlage null
+Punkte.
 
 ## 2. Datei als erste Datenquelle
 
-Die Beispielereignisse liegen als JSON Lines in:
-
-```text
-examples/spark-game-events.jsonl
-```
-
-Start:
+Die Datei `examples/spark-game-events.jsonl` enthaelt strukturierte
+Beispielereignisse. Jede Zeile ist ein vollstaendiges JSON-Event.
 
 ```bash
 sbt "runMain ch.tichess.analytics.ChessSparkAnalytics file examples/spark-game-events.jsonl"
 ```
 
-Spark liest die Datei mit einem festen Schema, erweitert die Events um
-`winner`, `draw` und `score` und aggregiert danach mit `groupBy`.
+Spark liest die Datei mit einem festen Schema. `GameStarted` und `MovePlayed`
+dienen als realistische Eingangsdaten, fuer die Bestenliste werden aber nur
+`GameFinished`-Events aggregiert.
 
-## 3. Kafka als Spark-Stream
-
-Der bestehende `stream-service` schreibt verarbeitete Kommandos in das Topic:
+Beispielausgabe:
 
 ```text
-tichess.events
+player  games  victories  draws  losses  score
+Black   3      1          1      1       4
+White   3      1          1      1       4
 ```
 
-Spark kann dieses Topic direkt als Structured Stream lesen:
+## 3. Echte Web-UI-Spiele als Kafka-Events
 
-```bash
-docker compose up --build -d
-sbt "runMain ch.tichess.analytics.ChessSparkAnalytics kafka localhost:9092 tichess.events"
+Die Web-UI sendet ihre Zuege und Kommandos wie bisher an den Controller. Der
+Controller erkennt fachlich relevante Zustandswechsel und publiziert
+strukturierte Events nach `tichess.game-events`:
+
+```json
+{
+  "eventId": "2bc...",
+  "gameId": "73a...",
+  "eventType": "GameFinished",
+  "command": "resign",
+  "winner": "Black",
+  "result": "resignation",
+  "moveCount": 12,
+  "timestamp": 1718712000000,
+  "fen": "..."
+}
 ```
 
-Danach koennen Kommandos wie bisher an Kafka gesendet werden:
+Damit werden nicht nur Testskripte ausgewertet. Normale Zuege, Aufgabe, Remis
+und Schachmatt aus der Web-UI gelangen automatisch in Kafka.
 
-```bash
-curl -H "Content-Type: text/plain" \
-  --data-binary @examples/chess-commands.dsl \
-  http://localhost:8083/api/kafka/commands
-```
+## 4. Spark Structured Streaming
 
-Die Spark-Ausgabe aktualisiert die Aggregation im Console Sink alle fuenf
-Sekunden.
-
-## 4. Implementierung
-
-Wesentliche Dateien:
-
-- `src/main/scala/ch/tichess/analytics/ChessSparkAnalytics.scala`
-- `src/test/scala/ch/tichess/analytics/ChessSparkAnalyticsSpec.scala`
-- `examples/spark-game-events.jsonl`
-
-Die Spark-Kafka-Anbindung verwendet:
+Spark liest das Topic fortlaufend:
 
 ```scala
 spark.readStream
   .format("kafka")
   .option("kafka.bootstrap.servers", bootstrapServers)
-  .option("subscribe", topic)
+  .option("subscribe", "tichess.game-events")
   .option("startingOffsets", "earliest")
   .load()
 ```
 
-Anschliessend wird `value` nach `String` gecastet und mit `from_json` in das
-gleiche Schema geparst, das auch fuer die Datei verwendet wird.
+Jede abgeschlossene Partie wird in zwei Auswertungszeilen umgewandelt: eine
+fuer White und eine fuer Black. Danach aggregiert Spark die Ergebnisse mit
+`groupBy`.
 
-## 5. Test
+## 5. Speicherung und Web-UI
 
-Die Aggregation ist mit einem Spark-Unit-Test abgedeckt:
+Jeder vollstaendige Streaming-Batch wird mit Upserts in die MongoDB-Collection
+`player_statistics` geschrieben. Ein Dokument sieht beispielsweise so aus:
+
+```json
+{
+  "_id": "White",
+  "games": 8,
+  "victories": 4,
+  "draws": 2,
+  "losses": 2,
+  "score": 14,
+  "updatedAt": 1718712000000
+}
+```
+
+Der Controller stellt die Daten unter `GET /api/controller/statistics` bereit.
+Der View-Service reicht sie unter `GET /api/view/statistics` weiter. Die
+Web-UI aktualisiert ihren Statistik-Tab alle fuenf Sekunden.
+
+## 6. Gesamtarchitektur
+
+```text
+Web-UI
+  -> Controller
+  -> Model
+  -> tichess.game-events
+  -> Spark Structured Streaming
+  -> MongoDB player_statistics
+  -> Controller REST
+  -> Web-UI Bestenliste
+```
+
+## 7. Start und Demo
+
+Die komplette Integration startet automatisch:
+
+```bash
+VIEW_HOST_PORT=8084 docker compose up --build -d
+```
+
+Danach:
+
+1. Web-UI unter `http://localhost:8084` oeffnen.
+2. Eine Partie starten.
+3. Einige Zuege spielen und eine Seite aufgeben lassen.
+4. Den Statistik-Tab oeffnen.
+5. Nach hoechstens fuenf Sekunden erscheint die aktualisierte Bestenliste.
+
+Spark-Logs:
+
+```bash
+docker compose logs -f spark-analytics
+```
+
+Kafka-Events:
+
+```bash
+docker compose exec kafka \
+  /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:19092 \
+  --topic tichess.game-events \
+  --from-beginning
+```
+
+## 8. Tests
 
 ```bash
 sbt "testOnly ch.tichess.analytics.ChessSparkAnalyticsSpec"
 ```
 
-Der Test prueft, dass Siege fuer White und Black erkannt und korrekt bewertet
-werden und dass fehlgeschlagene Events in der Gruppe `No winner` landen.
+Der Test prueft:
+
+- White/Black-Aggregation aus abgeschlossenen Partien
+- Sieg, Remis, Niederlage und Punktestand
+- Erzeugung eines strukturierten Spielende-Events
+- Ignorieren nicht spielrelevanter Kommandos

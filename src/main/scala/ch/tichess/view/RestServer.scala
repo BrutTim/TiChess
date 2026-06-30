@@ -3,12 +3,15 @@ package ch.tichess.view
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.*
+import akka.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken, RawHeader}
 import akka.http.scaladsl.server.Directives.*
+import akka.util.ByteString
 import ch.tichess.services.{ControllerHttpClient, ServiceConfig}
 
 import scala.concurrent.Await
-import scala.concurrent.ExecutionContextExecutor
-import scala.concurrent.duration.Duration
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+import scala.concurrent.duration.*
 import scala.util.{Failure, Success}
 
 object RestServer extends JsonSupport:
@@ -35,77 +38,112 @@ object RestServer extends JsonSupport:
                 |<html lang="en">
                 |<head>
                 |    <meta charset="UTF-8">
-                |    <title>TiChess REST API</title>
+                |    <title>TiChess</title>
                 |    <style>
                 |        :root {
-                |            --bg-color: #0f172a;
-                |            --glass-bg: rgba(30, 41, 59, 0.7);
-                |            --glass-border: rgba(255, 255, 255, 0.1);
-                |            --light-sq: #cbd5e1;
-                |            --dark-sq: #475569;
-                |            --highlight: rgba(56, 189, 248, 0.5);
-                |            --text-color: #f8fafc;
+                |            --page-bg: #171612;
+                |            --surface: #24231d;
+                |            --surface-2: #302e25;
+                |            --surface-3: #3b382d;
+                |            --border: rgba(232, 218, 190, 0.16);
+                |            --light-sq: #e2cfa6;
+                |            --dark-sq: #6f7f4f;
+                |            --highlight: rgba(235, 177, 77, 0.48);
+                |            --text-color: #fbf4e6;
+                |            --muted: #b8ad96;
+                |            --accent: #d69b3b;
+                |            --danger: #c95f48;
+                |            --success: #7c9f52;
                 |        }
+                |        * { box-sizing: border-box; }
+                |        html { min-height: 100%; background: var(--page-bg); }
                 |        body {
-                |            background-color: var(--bg-color);
+                |            background:
+                |                radial-gradient(circle at 12% 8%, rgba(214, 155, 59, 0.12), transparent 28rem),
+                |                linear-gradient(135deg, #171612 0%, #24231d 48%, #1b2418 100%);
                 |            color: var(--text-color);
                 |            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                |            margin: 0; display: flex; flex-direction: column; align-items: center;
-                |            min-height: 100vh; justify-content: center;
+                |            margin: 0; min-height: 100vh;
                 |        }
-                |        .container {
-                |            background: var(--glass-bg); backdrop-filter: blur(16px);
-                |            border: 1px solid var(--glass-border); border-radius: 1rem;
-                |            padding: 2rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-                |            display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+                |        .app-shell {
+                |            min-height: 100vh; display: flex; flex-direction: column;
+                |        }
+                |        .topbar {
+                |            min-height: 4.5rem; display: flex; align-items: center; justify-content: space-between;
+                |            gap: 1.5rem; padding: 1rem clamp(1rem, 3vw, 2.75rem);
+                |            background: rgba(23, 22, 18, 0.86); border-bottom: 1px solid var(--border);
+                |            backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 20;
+                |        }
+                |        .brand {
+                |            display: flex; flex-direction: column; gap: 0.12rem; min-width: 10rem;
                 |        }
                 |        h1 {
-                |            margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.025em;
-                |            background: linear-gradient(to right, #38bdf8, #818cf8);
-                |            -webkit-background-clip: text; background-clip: text; color: transparent;
+                |            margin: 0; font-size: clamp(1.5rem, 2.2vw, 2.35rem); font-weight: 800; letter-spacing: 0;
+                |        }
+                |        .brand-subtitle {
+                |            color: var(--muted); font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
                 |        }
                 |        .status {
-                |            font-size: 1.125rem; font-weight: 500; padding: 0.5rem 1rem;
-                |            background: rgba(0,0,0,0.2); border-radius: 0.5rem;
+                |            width: min(52rem, 100%); font-size: 1rem; font-weight: 700; padding: 0.78rem 1rem;
+                |            background: rgba(48, 46, 37, 0.74); border: 1px solid var(--border); border-radius: 0.5rem;
+                |            color: #f8ead0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
                 |        }
-                |        .board-panel { width: 32rem; display: flex; flex-direction: column; gap: 0.6rem; }
-                |        .clock-row { display: flex; justify-content: flex-end; }
+                |        .main-layout {
+                |            flex: 1; display: grid; grid-template-columns: minmax(28rem, 1fr) minmax(22rem, 27rem);
+                |            gap: clamp(1rem, 2.8vw, 2.25rem); align-items: start;
+                |            width: min(100%, 96rem); margin: 0 auto; padding: clamp(1rem, 2.6vw, 2.5rem);
+                |        }
+                |        .board-area {
+                |            min-height: calc(100vh - 7rem); display: grid; place-items: start center;
+                |            padding: clamp(0.5rem, 1.8vw, 1.5rem);
+                |        }
+                |        .board-panel {
+                |            width: min(100%, calc(100vh - 17rem), 46rem); min-width: min(100%, 28rem);
+                |            display: flex; flex-direction: column; gap: 0.35rem; position: relative;
+                |        }
+                |        .clock-row {
+                |            position: absolute; right: 0.85rem; z-index: 4;
+                |            display: flex; justify-content: flex-end; min-height: 0; pointer-events: none;
+                |        }
+                |        .clock-row:first-child { top: 0.85rem; }
+                |        .clock-row:last-child { bottom: 0.85rem; }
                 |        .clock {
                 |            min-width: 7.25rem; padding: 0.55rem 0.9rem; border-radius: 0.85rem; text-align: center;
-                |            background: rgba(15, 23, 42, 0.76); border: 1px solid rgba(255,255,255,0.08);
+                |            background: rgba(36, 35, 29, 0.88); border: 1px solid var(--border);
                 |            box-shadow: 0 10px 18px -16px rgba(0, 0, 0, 0.85);
                 |            display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
                 |            transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
                 |        }
-                |        .clock-label { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
+                |        .clock-label { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
                 |        .clock-time { font-size: 1.55rem; font-weight: 800; font-variant-numeric: tabular-nums; }
                 |        .clock.white-side {
-                |            background: rgba(248, 250, 252, 0.94); border-color: rgba(148, 163, 184, 0.3); color: #0f172a;
+                |            background: rgba(251, 244, 230, 0.96); border-color: rgba(214, 155, 59, 0.3); color: #171612;
                 |        }
-                |        .clock.white-side .clock-label { color: rgba(51, 65, 85, 0.78); }
+                |        .clock.white-side .clock-label { color: rgba(75, 67, 50, 0.78); }
                 |        .clock.active {
-                |            background: rgba(30, 41, 59, 0.96); border-color: rgba(96, 165, 250, 0.45);
-                |            box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.2), 0 0 20px rgba(59, 130, 246, 0.18);
+                |            background: rgba(48, 46, 37, 0.98); border-color: rgba(214, 155, 59, 0.5);
+                |            box-shadow: 0 0 0 1px rgba(214, 155, 59, 0.18), 0 0 20px rgba(214, 155, 59, 0.16);
                 |            transform: translateY(-1px);
                 |        }
                 |        .clock.white-side.active {
-                |            background: rgba(255, 255, 255, 0.98); border-color: rgba(59, 130, 246, 0.35);
-                |            box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.16), 0 0 18px rgba(148, 163, 184, 0.22);
+                |            background: rgba(255, 251, 241, 0.98); border-color: rgba(214, 155, 59, 0.36);
+                |            box-shadow: 0 0 0 1px rgba(214, 155, 59, 0.14), 0 0 18px rgba(214, 155, 59, 0.18);
                 |        }
                 |        .clock.expired {
-                |            background: rgba(127, 29, 29, 0.92); border-color: rgba(248, 113, 113, 0.45);
-                |            box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.2), 0 0 20px rgba(239, 68, 68, 0.18);
+                |            background: rgba(105, 39, 31, 0.94); border-color: rgba(201, 95, 72, 0.5);
+                |            box-shadow: 0 0 0 1px rgba(201, 95, 72, 0.2), 0 0 20px rgba(201, 95, 72, 0.18);
                 |        }
                 |        .board {
-                |            display: grid; grid-template-columns: repeat(8, 4rem); grid-template-rows: repeat(8, 4rem);
-                |            border: 4px solid var(--dark-sq); border-radius: 0.25rem;
-                |            overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.4);
+                |            width: 100%; aspect-ratio: 1; display: grid;
+                |            grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr));
+                |            border: 0.6rem solid #2b281f; border-radius: 0.35rem;
+                |            overflow: hidden; box-shadow: 0 24px 55px -26px rgba(0,0,0,0.86);
                 |            align-content: start;
                 |            line-height: 0;
                 |        }
                 |        .square {
-                |            width: 4rem; height: 4rem; display: flex; justify-content: center; align-items: center;
-                |            font-size: 2.75rem; cursor: pointer; user-select: none;
+                |            width: 100%; height: auto; aspect-ratio: 1; display: flex; justify-content: center; align-items: center;
+                |            font-size: clamp(2rem, 5.4vw, 4.15rem); cursor: pointer; user-select: none;
                 |            transition: background-color 0.15s ease, transform 0.1s ease;
                 |            position: relative;
                 |            line-height: 1;
@@ -127,8 +165,8 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .coord-rank { top: 0.28rem; left: 0.35rem; }
                 |        .coord-file { right: 0.35rem; bottom: 0.28rem; }
-                |        .sq-light .coord-label { color: rgba(71, 85, 105, 0.9); }
-                |        .sq-dark .coord-label { color: rgba(226, 232, 240, 0.92); }
+                |        .sq-light .coord-label { color: rgba(67, 57, 38, 0.82); }
+                |        .sq-dark .coord-label { color: rgba(246, 236, 213, 0.9); }
                 |        .modal-overlay {
                 |            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
                 |            background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
@@ -137,12 +175,12 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .modal-overlay.active { opacity: 1; pointer-events: all; }
                 |        .modal-content {
-                |            background: var(--bg-color); border: 1px solid var(--glass-border);
+                |            background: var(--surface); border: 1px solid var(--border);
                 |            border-radius: 1rem; padding: 2rem; display: flex; gap: 1rem;
                 |            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
                 |        }
                 |        .promo-btn {
-                |            background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 0.5rem;
+                |            background: var(--surface-2); border: 1px solid var(--border); border-radius: 0.5rem;
                 |            font-size: 2.5rem; width: 4.5rem; height: 4.5rem; cursor: pointer; color: var(--text-color); transition: all 0.2s;
                 |        }
                 |        .promo-btn:hover { background: var(--highlight); transform: translateY(-2px); }
@@ -152,41 +190,41 @@ object RestServer extends JsonSupport:
                 |        .board.locked { pointer-events: none; opacity: 0.8; }
                 |        .action-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; justify-content: center; }
                 |        .action-btn {
-                |            padding: 0.45rem 1.1rem; border-radius: 0.5rem; border: 1px solid var(--glass-border);
-                |            background: var(--glass-bg); color: var(--text-color); font-size: 0.9rem;
+                |            min-height: 2.65rem; padding: 0.55rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border);
+                |            background: var(--surface-2); color: var(--text-color); font-size: 0.9rem; font-weight: 700;
                 |            cursor: pointer; transition: all 0.2s;
                 |        }
                 |        .action-btn:hover:not(:disabled) { background: var(--highlight); }
                 |        .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-                |        .action-btn.accept { background: rgba(34,197,94,0.25); border-color: rgba(34,197,94,0.5); }
-                |        .action-btn.accept:hover:not(:disabled) { background: rgba(34,197,94,0.45); }
-                |        .action-btn.decline { background: rgba(249,115,22,0.25); border-color: rgba(249,115,22,0.5); }
-                |        .action-btn.decline:hover:not(:disabled) { background: rgba(249,115,22,0.45); }
-                |        .action-btn.resign { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.5); }
-                |        .action-btn.resign:hover:not(:disabled) { background: rgba(239,68,68,0.45); }
-                |        .action-btn.new-game { background: rgba(59,130,246,0.25); border-color: rgba(59,130,246,0.5); }
-                |        .action-btn.new-game:hover:not(:disabled) { background: rgba(59,130,246,0.45); }
-                |        .captured-pieces { font-size: 1.25rem; min-height: 1.5rem; letter-spacing: 2px; color: var(--text-color); margin: 4px 0; }
-                |        .main-layout { display: flex; gap: 2rem; justify-content: center; align-items: flex-start; flex-wrap: wrap; max-width: 1200px; margin: 0 auto; }
+                |        .action-btn.accept { background: rgba(124,159,82,0.28); border-color: rgba(124,159,82,0.58); }
+                |        .action-btn.accept:hover:not(:disabled) { background: rgba(124,159,82,0.48); }
+                |        .action-btn.decline { background: rgba(214,155,59,0.26); border-color: rgba(214,155,59,0.54); }
+                |        .action-btn.decline:hover:not(:disabled) { background: rgba(214,155,59,0.45); }
+                |        .action-btn.resign { background: rgba(201,95,72,0.26); border-color: rgba(201,95,72,0.56); }
+                |        .action-btn.resign:hover:not(:disabled) { background: rgba(201,95,72,0.46); }
+                |        .action-btn.new-game { background: rgba(105,127,79,0.28); border-color: rgba(136,157,94,0.5); }
+                |        .action-btn.new-game:hover:not(:disabled) { background: rgba(105,127,79,0.46); }
+                |        .captured-pieces { font-size: 1.15rem; min-height: 1.35rem; letter-spacing: 2px; color: var(--text-color); margin: 0; }
                 |        .sidebar {
-                |            background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 1rem; padding: 1.5rem;
-                |            display: flex; flex-direction: column; gap: 1rem; min-width: 340px; width: 380px;
-                |            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+                |            background: rgba(36, 35, 29, 0.92); border: 1px solid var(--border); border-radius: 0.45rem; padding: 1rem;
+                |            display: flex; flex-direction: column; gap: 1rem; min-width: 0; width: 100%;
+                |            min-height: calc(100vh - 7rem); box-shadow: 0 18px 42px -30px rgba(0, 0, 0, 0.8);
+                |            position: sticky; top: 6rem;
                 |        }
                 |        .tab-bar {
-                |            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem;
-                |            background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(255,255,255,0.06);
-                |            border-radius: 0.9rem; padding: 0.35rem;
+                |            display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem;
+                |            background: rgba(23, 22, 18, 0.72); border: 1px solid var(--border);
+                |            border-radius: 0.45rem; padding: 0.3rem;
                 |        }
                 |        .tab-btn {
-                |            border: 0; border-radius: 0.7rem; padding: 0.85rem 0.95rem; text-align: center;
-                |            background: transparent; color: #cbd5e1; cursor: pointer; transition: all 0.2s ease;
+                |            border: 0; border-radius: 0.35rem; padding: 0.78rem 0.85rem; text-align: center;
+                |            background: transparent; color: var(--muted); cursor: pointer; transition: all 0.2s ease;
                 |            display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
                 |        }
                 |        .tab-btn:hover { background: rgba(255,255,255,0.06); color: #f8fafc; }
                 |        .tab-btn.active {
-                |            background: linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(129, 140, 248, 0.18));
-                |            color: #f8fafc; box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.18);
+                |            background: rgba(214, 155, 59, 0.22);
+                |            color: #fff6df; box-shadow: inset 0 0 0 1px rgba(214, 155, 59, 0.22);
                 |        }
                 |        .tab-icon { font-size: 1.2rem; line-height: 1; }
                 |        .tab-label { font-size: 0.98rem; font-weight: 700; }
@@ -197,62 +235,118 @@ object RestServer extends JsonSupport:
                 |        .tab-panel { display: none; flex-direction: column; gap: 1rem; }
                 |        .tab-panel.active { display: flex; }
                 |        .panel-card {
-                |            background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255,255,255,0.06);
-                |            border-radius: 0.9rem; padding: 1rem; display: flex; flex-direction: column; gap: 0.8rem;
+                |            background: rgba(48, 46, 37, 0.72); border: 1px solid var(--border);
+                |            border-radius: 0.45rem; padding: 1rem; display: flex; flex-direction: column; gap: 0.8rem;
                 |        }
                 |        .panel-card h3 { margin: 0; font-size: 1.05rem; }
                 |        .mini-title { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 1rem; }
                 |        .mini-icon { font-size: 1.05rem; }
                 |        .move-list {
-                |            height: 280px; overflow-y: auto; background: rgba(0,0,0,0.18); border-radius: 0.75rem;
-                |            padding: 0.6rem; font-family: monospace; font-size: 0.95rem; border: 1px solid rgba(255,255,255,0.05);
+                |            height: clamp(12rem, 30vh, 22rem); overflow-y: auto; background: rgba(23,22,18,0.48); border-radius: 0.35rem;
+                |            padding: 0.6rem; font-family: monospace; font-size: 0.95rem; border: 1px solid var(--border);
                 |        }
                 |        .move-list div { padding: 0.45rem 0.55rem; border-radius: 0.45rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
                 |        .move-list div:last-child { border-bottom: 0; }
-                |        .move-list .latest { background: rgba(134, 239, 172, 0.14); border: 1px solid rgba(134, 239, 172, 0.18); }
+                |        .move-list .latest { background: rgba(124,159,82,0.18); border: 1px solid rgba(124,159,82,0.24); }
                 |        .action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
                 |        .action-grid .action-btn.wide { grid-column: 1 / -1; }
                 |        .notation-box { display: flex; flex-direction: column; gap: 0.75rem; }
                 |        .field-group { display: flex; flex-direction: column; gap: 0.45rem; }
-                |        .field-group label { font-size: 0.85rem; font-weight: 700; color: #e2e8f0; }
-                |        .hint { font-size: 0.8rem; color: #94a3b8; }
+                |        .field-group label { font-size: 0.85rem; font-weight: 700; color: #eadfc7; }
+                |        .hint { font-size: 0.8rem; color: var(--muted); }
                 |        .notation-text {
-                |            width: 100%; min-height: 90px; background: rgba(0,0,0,0.2); color: var(--text-color);
-                |            border: 1px solid var(--glass-border); border-radius: 0.75rem; padding: 0.75rem;
+                |            width: 100%; min-height: 9rem; background: rgba(23,22,18,0.45); color: var(--text-color);
+                |            border: 1px solid var(--border); border-radius: 0.35rem; padding: 0.75rem;
                 |            font-family: monospace; resize: vertical; box-sizing: border-box;
                 |        }
-                |        select {
-                |            background: rgba(0,0,0,0.2); color: var(--text-color); border: 1px solid var(--glass-border);
-                |            padding: 0.7rem 0.75rem; border-radius: 0.75rem;
+                |        select, .text-input {
+                |            width: 100%;
+                |            background: rgba(23,22,18,0.45); color: var(--text-color); border: 1px solid var(--border);
+                |            padding: 0.7rem 0.75rem; border-radius: 0.35rem;
                 |        }
+                |        .text-input::placeholder { color: rgba(184, 173, 150, 0.72); }
                 |        .future-controls { display: grid; gap: 0.75rem; }
                 |        .future-controls .action-btn { width: 100%; }
                 |        .challenge-meta {
                 |            padding: 0.65rem 0.75rem; border-radius: 0.65rem; min-height: 1.2rem;
-                |            background: rgba(0,0,0,0.16); border: 1px solid rgba(255,255,255,0.06);
-                |            color: #e2e8f0; font-size: 0.95rem; font-weight: 700;
+                |            background: rgba(23,22,18,0.42); border: 1px solid var(--border);
+                |            color: #eadfc7; font-size: 0.95rem; font-weight: 700;
+                |        }
+                |        .statistics-table {
+                |            width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
+                |        }
+                |        .statistics-table th, .statistics-table td {
+                |            padding: 0.7rem 0.45rem; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.07);
+                |        }
+                |        .statistics-table th:first-child, .statistics-table td:first-child { text-align: left; }
+                |        .statistics-table th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; }
+                |        .statistics-table tbody tr:first-child td { color: #e0b04b; font-weight: 800; }
+                |        .statistics-empty { color: var(--muted); line-height: 1.5; }
+                |        .tournament-list, .tournament-log {
+                |            min-height: 6rem; max-height: 14rem; overflow: auto; white-space: pre-wrap;
+                |            background: rgba(23,22,18,0.48); border: 1px solid var(--border);
+                |            border-radius: 0.35rem; padding: 0.7rem; color: #eadfc7;
+                |            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; line-height: 1.45;
+                |        }
+                |        .tournament-list {
+                |            display: grid; gap: 0.6rem; white-space: normal; font-family: inherit;
+                |        }
+                |        .tournament-entry {
+                |            padding: 0.65rem; border: 1px solid rgba(255,255,255,0.08); border-radius: 0.35rem;
+                |            background: rgba(255,255,255,0.035);
+                |        }
+                |        .tournament-entry-header {
+                |            display: flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start;
+                |        }
+                |        .tournament-name { font-weight: 800; color: #fff5dd; overflow-wrap: anywhere; }
+                |        .tournament-id { margin-top: 0.15rem; color: #c9bfa7; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+                |        .tournament-status {
+                |            flex: 0 0 auto; color: #15130f; background: #d8bd77; border-radius: 999px;
+                |            padding: 0.12rem 0.45rem; font-size: 0.72rem; font-weight: 900; text-transform: uppercase;
+                |        }
+                |        .tournament-meta { margin-top: 0.45rem; color: var(--muted); font-size: 0.78rem; }
+                |        .tournament-list button {
+                |            margin-top: 0.45rem; width: 100%;
                 |        }
                 |        .start-btn {
                 |            width: 100%; padding: 0.95rem 1.2rem; font-size: 1.15rem; font-weight: 700;
-                |            background: linear-gradient(180deg, rgba(132, 204, 22, 0.95), rgba(101, 163, 13, 0.95));
-                |            border-color: rgba(163, 230, 53, 0.45); color: #f8fafc;
+                |            background: linear-gradient(180deg, rgba(124, 159, 82, 0.96), rgba(86, 119, 67, 0.96));
+                |            border-color: rgba(164, 190, 104, 0.45); color: #fff8e8;
                 |        }
                 |        .start-btn:disabled { opacity: 0.55; }
-                |        @media (max-width: 980px) {
-                |            .sidebar { width: min(100%, 42rem); }
+                |        @media (min-width: 1121px) {
+                |            .clock-row { right: -7.8rem; }
+                |        }
+                |        @media (max-width: 1120px) {
+                |            .main-layout { grid-template-columns: 1fr; }
+                |            .board-area { min-height: auto; padding-top: 0.5rem; }
+                |            .board-panel { width: min(100%, 42rem); min-width: 0; }
+                |            .sidebar { position: static; min-height: auto; }
                 |        }
                 |        @media (max-width: 640px) {
-                |            .sidebar { min-width: 0; width: 100%; }
+                |            .topbar { position: static; align-items: flex-start; flex-direction: column; gap: 0.75rem; }
+                |            .status { font-size: 0.9rem; }
+                |            .main-layout { width: 100%; gap: 1rem; padding: 0.75rem; }
+                |            .board-area { padding: 0; }
+                |            .board { border-width: 0.35rem; }
+                |            .square { font-size: clamp(1.75rem, 9vw, 2.4rem); min-width: 0; }
+                |            .sidebar { min-width: 0; width: 100%; padding: 0.8rem; }
+                |            .statistics-table th, .statistics-table td { padding: 0.55rem 0.2rem; font-size: 0.75rem; }
                 |            .action-grid, .tab-bar { grid-template-columns: 1fr; }
                 |        }
                 |    </style>
                 |</head>
                 |<body>
-                |
-                |<div class="main-layout">
-                |<div class="container">
-                |    <h1>TiChess Web GUI</h1>
+                |<div class="app-shell">
+                |<header class="topbar">
+                |    <div class="brand">
+                |        <h1>TiChess</h1>
+                |        <span class="brand-subtitle">Web Chess Console</span>
+                |    </div>
                 |    <div id="status" class="status">Connecting...</div>
+                |</header>
+                |<main class="main-layout">
+                |<section class="board-area" aria-label="Schachbrett">
                 |    <div class="board-panel">
                 |        <div class="clock-row">
                 |            <div id="clock-black" class="clock">
@@ -270,7 +364,7 @@ object RestServer extends JsonSupport:
                 |            </div>
                 |        </div>
                 |    </div>
-                |</div>
+                |</section>
                 |<div class="sidebar">
                 |    <div class="tab-bar" role="tablist" aria-label="Schach Seitenbereich">
                 |        <button id="tab-btn-game" class="tab-btn active" type="button" role="tab" aria-selected="true" aria-controls="tab-game" onclick="switchTab('game')">
@@ -284,6 +378,14 @@ object RestServer extends JsonSupport:
                 |        <button id="tab-btn-challenges" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-challenges" onclick="switchTab('challenges')">
                 |            <span class="tab-icon" aria-hidden="true">🧩</span>
                 |            <span class="tab-label sr-only">Challenges</span>
+                |        </button>
+                |        <button id="tab-btn-tournament" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-tournament" onclick="switchTab('tournament')">
+                |            <span class="tab-icon" aria-hidden="true">&#x265C;&#xFE0E;</span>
+                |            <span class="tab-label sr-only">Turnier</span>
+                |        </button>
+                |        <button id="tab-btn-statistics" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-statistics" onclick="switchTab('statistics')">
+                |            <span class="tab-icon" aria-hidden="true">&#x2605;</span>
+                |            <span class="tab-label sr-only">Statistik</span>
                 |        </button>
                 |    </div>
                 |    <section id="tab-game" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-game">
@@ -353,8 +455,57 @@ object RestServer extends JsonSupport:
                 |            </div>
                 |        </div>
                 |    </section>
+                |    <section id="tab-tournament" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-tournament">
+                |        <div class="panel-card">
+                |            <h3 class="mini-title"><span class="mini-icon">&#x265C;&#xFE0E;</span><span>Turnier</span></h3>
+                |            <div class="future-controls">
+                |                <div class="field-group">
+                |                    <label for="tournament-base-url">Server</label>
+                |                    <input id="tournament-base-url" class="text-input" value="https://tournament.staging.maichess.berger-software.com">
+                |                </div>
+                |                <div class="field-group">
+                |                    <label for="tournament-token">Token</label>
+                |                    <input id="tournament-token" class="text-input" type="password" placeholder="TOURNAMENT_TOKEN">
+                |                </div>
+                |                <div class="field-group">
+                |                    <label for="tournament-id">Turnier-ID</label>
+                |                    <input id="tournament-id" class="text-input" placeholder="tournament id">
+                |                </div>
+                |                <div class="action-grid">
+                |                    <button class="action-btn" type="button" onclick="loadTournamentList()">Aktualisieren</button>
+                |                    <button class="action-btn" type="button" onclick="connectTournamentStream()">Turnier verfolgen</button>
+                |                    <button class="action-btn resign wide" type="button" onclick="stopTournamentStreams()">Streams stoppen</button>
+                |                </div>
+                |                <div id="tournament-list" class="tournament-list">Noch keine Turnierliste geladen.</div>
+                |            </div>
+                |        </div>
+                |        <div class="panel-card">
+                |            <h3 class="mini-title"><span>Spiel verfolgen</span></h3>
+                |            <div class="future-controls">
+                |                <div class="field-group">
+                |                    <label for="tournament-game-id">Game-ID</label>
+                |                    <input id="tournament-game-id" class="text-input" placeholder="game id aus dem Stream">
+                |                </div>
+                |                <button class="action-btn start-btn" type="button" onclick="connectTournamentGameStream()">Spielstream öffnen</button>
+                |                <div id="tournament-log" class="tournament-log">Bereit.</div>
+                |            </div>
+                |        </div>
+                |    </section>
+                |    <section id="tab-statistics" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-statistics">
+                |        <div class="panel-card">
+                |            <h3 class="mini-title"><span>Bestenliste</span></h3>
+                |            <table class="statistics-table">
+                |                <thead>
+                |                    <tr><th>Farbe</th><th>Spiele</th><th>Siege</th><th>Remis</th><th>Niederl.</th><th>Punkte</th></tr>
+                |                </thead>
+                |                <tbody id="statistics-body">
+                |                    <tr><td colspan="6" class="statistics-empty">Noch keine abgeschlossene Partie ausgewertet.</td></tr>
+                |                </tbody>
+                |            </table>
+                |        </div>
+                |    </section>
                 |</div>
-                |</div>
+                |</main>
                 |
                 |<div id="promo-modal" class="modal-overlay">
                 |    <div class="modal-content">
@@ -364,8 +515,10 @@ object RestServer extends JsonSupport:
                 |        <button class="promo-btn" onclick="selectPromotion('n')">&#x265E;&#xFE0E;</button>
                 |    </div>
                 |</div>
+                |</div>
                 |
-                |<script>
+                |""".stripMargin +
+                """<script>
                 |    const pieceMap = {
                 |        'K': { char: '&#x265A;&#xFE0E;', cls: 'piece-white' }, 'Q': { char: '&#x265B;&#xFE0E;', cls: 'piece-white' },
                 |        'R': { char: '&#x265C;&#xFE0E;', cls: 'piece-white' }, 'B': { char: '&#x265D;&#xFE0E;', cls: 'piece-white' },
@@ -387,6 +540,8 @@ object RestServer extends JsonSupport:
                 |    let activeBot = null;
                 |    let botInFlight = false;
                 |    let lastBotMoveForFen = null;
+                |    let tournamentAbortController = null;
+                |    let tournamentGameAbortController = null;
                 |    let gameStarted = false;
                 |    let gameTimedOut = false;
                 |    let timeoutLoser = null;
@@ -395,6 +550,7 @@ object RestServer extends JsonSupport:
                 |    let blackRemainingMs = clockBaseMs;
                 |    let activeClock = null;
                 |    let timerHandle = null;
+                |    let statisticsTimerHandle = null;
                 |    let lastTickAt = 0;
                 |    function algebraic(idx) {
                 |        const file = idx % 8; const rank = 7 - Math.floor(idx / 8);
@@ -411,6 +567,15 @@ object RestServer extends JsonSupport:
                 |        const minutes = Math.floor(totalSeconds / 60);
                 |        const seconds = totalSeconds % 60;
                 |        return `${pad(minutes)}:${pad(seconds)}`;
+                |    }
+                |    async function fetchWithTimeout(url, options = {}, timeoutMs = 2500) {
+                |        const controller = new AbortController();
+                |        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+                |        try {
+                |            return await fetch(url, { ...options, signal: controller.signal });
+                |        } finally {
+                |            clearTimeout(timeout);
+                |        }
                 |    }
                 |    function updateClockDisplay() {
                 |        document.getElementById('clock-white-time').innerText = formatClock(whiteRemainingMs);
@@ -534,12 +699,254 @@ object RestServer extends JsonSupport:
                 |    }
                 |    function switchTab(tabName) {
                 |        activeTab = tabName;
-                |        ['game', 'io', 'challenges'].forEach(tab => {
+                |        ['game', 'io', 'challenges', 'tournament', 'statistics'].forEach(tab => {
                 |            const active = tabName === tab;
                 |            document.getElementById('tab-btn-' + tab).classList.toggle('active', active);
                 |            document.getElementById('tab-btn-' + tab).setAttribute('aria-selected', String(active));
                 |            document.getElementById('tab-' + tab).classList.toggle('active', active);
                 |        });
+                |        if (tabName === 'statistics') startStatisticsPolling(); else stopStatisticsPolling();
+                |    }
+                |    function startStatisticsPolling() {
+                |        fetchStatistics();
+                |        if (statisticsTimerHandle === null) statisticsTimerHandle = setInterval(fetchStatistics, 10000);
+                |    }
+                |    function stopStatisticsPolling() {
+                |        if (statisticsTimerHandle !== null) {
+                |            clearInterval(statisticsTimerHandle);
+                |            statisticsTimerHandle = null;
+                |        }
+                |    }
+                |    async function fetchStatistics() {
+                |        const body = document.getElementById('statistics-body');
+                |        try {
+                |            const response = await fetchWithTimeout('/api/view/statistics', {}, 2000);
+                |            const statistics = await response.json();
+                |            body.innerHTML = '';
+                |            if (!statistics.length) {
+                |                body.innerHTML = '<tr><td colspan="6" class="statistics-empty">Noch keine abgeschlossene Partie ausgewertet.</td></tr>';
+                |                return;
+                |            }
+                |            statistics.forEach(entry => {
+                |                const row = document.createElement('tr');
+                |                const label = entry.player === 'White' ? 'Weiß' : entry.player === 'Black' ? 'Schwarz' : entry.player;
+                |                [label, entry.games, entry.victories, entry.draws, entry.losses, entry.score].forEach(value => {
+                |                    const cell = document.createElement('td');
+                |                    cell.innerText = value;
+                |                    row.appendChild(cell);
+                |                });
+                |                body.appendChild(row);
+                |            });
+                |        } catch (error) {
+                |            body.innerHTML = '<tr><td colspan="6" class="statistics-empty">Statistik ist derzeit nicht erreichbar.</td></tr>';
+                |        }
+                |    }
+                |    function tournamentConfig() {
+                |        return {
+                |            baseUrl: document.getElementById('tournament-base-url').value.trim(),
+                |            token: document.getElementById('tournament-token').value.trim(),
+                |            tournamentId: document.getElementById('tournament-id').value.trim(),
+                |            gameId: document.getElementById('tournament-game-id').value.trim()
+                |        };
+                |    }
+                |    function appendTournamentLog(text) {
+                |        const log = document.getElementById('tournament-log');
+                |        const timestamp = new Date().toLocaleTimeString();
+                |        log.textContent = (log.textContent === 'Bereit.' ? '' : log.textContent + '\n') + `[${timestamp}] ${text}`;
+                |        log.scrollTop = log.scrollHeight;
+                |    }
+                |    function renderTournamentListBody(body) {
+                |        const target = document.getElementById('tournament-list');
+                |        try {
+                |            const parsed = JSON.parse(body);
+                |            const groupedItems = [];
+                |            if (Array.isArray(parsed)) {
+                |                parsed.forEach(item => groupedItems.push({ item, status: item.status || '' }));
+                |            } else {
+                |                Object.entries(parsed || {}).forEach(([status, value]) => {
+                |                    if (Array.isArray(value)) {
+                |                        value.forEach(item => groupedItems.push({ item, status: item.status || status }));
+                |                    }
+                |                });
+                |            }
+                |            if (groupedItems.length > 0) {
+                |                target.innerHTML = '';
+                |                groupedItems.forEach(({ item, status }) => {
+                |                    const id = item.id || item.tournamentId || item._id || '';
+                |                    const name = item.fullName || item.name || item.title || id || 'Turnier';
+                |                    const playerCount = item.nbPlayers || item.players || item.playerCount;
+                |                    const roundCount = item.nbRounds || item.rounds;
+                |                    const clock = item.clock && item.clock.limit ? `${item.clock.limit}+${item.clock.increment || 0}` : null;
+                |                    const meta = [
+                |                        item.format,
+                |                        item.variant,
+                |                        roundCount ? `${roundCount} Runden` : null,
+                |                        playerCount ? `${playerCount} Spieler` : null,
+                |                        clock ? `${clock} Uhr` : null,
+                |                        item.rated === true ? 'rated' : (item.rated === false ? 'casual' : null)
+                |                    ].filter(Boolean).join(' • ');
+                |                    const entry = document.createElement('div');
+                |                    entry.className = 'tournament-entry';
+                |                    const header = document.createElement('div');
+                |                    header.className = 'tournament-entry-header';
+                |                    const titleBlock = document.createElement('div');
+                |                    const nameEl = document.createElement('div');
+                |                    nameEl.className = 'tournament-name';
+                |                    nameEl.textContent = name;
+                |                    titleBlock.appendChild(nameEl);
+                |                    if (id) {
+                |                        const idEl = document.createElement('div');
+                |                        idEl.className = 'tournament-id';
+                |                        idEl.textContent = `ID: ${id}`;
+                |                        titleBlock.appendChild(idEl);
+                |                    }
+                |                    header.appendChild(titleBlock);
+                |                    if (status) {
+                |                        const statusEl = document.createElement('div');
+                |                        statusEl.className = 'tournament-status';
+                |                        statusEl.textContent = status;
+                |                        header.appendChild(statusEl);
+                |                    }
+                |                    entry.appendChild(header);
+                |                    if (meta) {
+                |                        const metaEl = document.createElement('div');
+                |                        metaEl.className = 'tournament-meta';
+                |                        metaEl.textContent = meta;
+                |                        entry.appendChild(metaEl);
+                |                    }
+                |                    if (id) {
+                |                        const button = document.createElement('button');
+                |                        button.className = 'action-btn';
+                |                        button.type = 'button';
+                |                        button.textContent = 'Verfolgen';
+                |                        button.onclick = () => {
+                |                            document.getElementById('tournament-id').value = id;
+                |                            connectTournamentStream();
+                |                        };
+                |                        entry.appendChild(button);
+                |                    }
+                |                    target.appendChild(entry);
+                |                });
+                |                return;
+                |            }
+                |            target.textContent = JSON.stringify(parsed, null, 2);
+                |        } catch (_) {
+                |            target.textContent = body || 'Keine Turnierliste empfangen.';
+                |        }
+                |    }
+                |    async function loadTournamentList() {
+                |        const cfg = tournamentConfig();
+                |        if (!cfg.baseUrl) {
+                |            document.getElementById('tournament-list').textContent = 'Bitte Server-URL eintragen.';
+                |            return;
+                |        }
+                |        document.getElementById('tournament-list').textContent = 'Lade Turniere...';
+                |        try {
+                |            const res = await fetchWithTimeout('/api/tournament/list', {
+                |                method: 'POST',
+                |                headers: { 'Content-Type': 'application/json' },
+                |                body: JSON.stringify({ baseUrl: cfg.baseUrl, token: cfg.token ? cfg.token : null })
+                |            }, 5000);
+                |            const data = await res.json();
+                |            if (!data.success) {
+                |                document.getElementById('tournament-list').textContent = data.error || data.body || 'Turnierliste konnte nicht geladen werden.';
+                |                return;
+                |            }
+                |            renderTournamentListBody(data.body);
+                |        } catch (error) {
+                |            document.getElementById('tournament-list').textContent = 'Turnierliste ist nicht erreichbar.';
+                |        }
+                |    }
+                |    async function readNdjsonStream(response, onEvent) {
+                |        const reader = response.body.getReader();
+                |        const decoder = new TextDecoder();
+                |        let buffer = '';
+                |        while (true) {
+                |            const { value, done } = await reader.read();
+                |            if (done) break;
+                |            buffer += decoder.decode(value, { stream: true });
+                |            const lines = buffer.split('\n');
+                |            buffer = lines.pop();
+                |            lines.map(line => line.trim()).filter(Boolean).forEach(line => {
+                |                try { onEvent(JSON.parse(line), line); } catch (_) { onEvent(null, line); }
+                |            });
+                |        }
+                |        if (buffer.trim()) {
+                |            try { onEvent(JSON.parse(buffer.trim()), buffer.trim()); } catch (_) { onEvent(null, buffer.trim()); }
+                |        }
+                |    }
+                |    async function connectTournamentStream() {
+                |        const cfg = tournamentConfig();
+                |        if (!cfg.baseUrl || !cfg.token || !cfg.tournamentId) {
+                |            appendTournamentLog('Server, Token und Turnier-ID werden benoetigt.');
+                |            return;
+                |        }
+                |        if (tournamentAbortController) tournamentAbortController.abort();
+                |        tournamentAbortController = new AbortController();
+                |        appendTournamentLog(`Verbinde Turnier ${cfg.tournamentId}...`);
+                |        try {
+                |            const response = await fetch('/api/tournament/stream', {
+                |                method: 'POST',
+                |                headers: { 'Content-Type': 'application/json' },
+                |                body: JSON.stringify({ baseUrl: cfg.baseUrl, token: cfg.token, tournamentId: cfg.tournamentId }),
+                |                signal: tournamentAbortController.signal
+                |            });
+                |            if (!response.ok) {
+                |                appendTournamentLog(`Turnierstream fehlgeschlagen (${response.status}).`);
+                |                return;
+                |            }
+                |            await readNdjsonStream(response, event => {
+                |                if (!event) return;
+                |                const gameInfo = event.gameId ? ` game=${event.gameId}` : '';
+                |                const roundInfo = event.round ? ` round=${event.round}` : '';
+                |                const colorInfo = event.color ? ` color=${event.color}` : '';
+                |                appendTournamentLog(`${event.type}${roundInfo}${gameInfo}${colorInfo}`);
+                |                if (event.gameId) document.getElementById('tournament-game-id').value = event.gameId;
+                |            });
+                |        } catch (error) {
+                |            if (error.name !== 'AbortError') appendTournamentLog('Turnierstream getrennt.');
+                |        }
+                |    }
+                |    async function connectTournamentGameStream() {
+                |        const cfg = tournamentConfig();
+                |        if (!cfg.baseUrl || !cfg.token || !cfg.tournamentId || !cfg.gameId) {
+                |            appendTournamentLog('Server, Token, Turnier-ID und Game-ID werden benoetigt.');
+                |            return;
+                |        }
+                |        if (tournamentGameAbortController) tournamentGameAbortController.abort();
+                |        tournamentGameAbortController = new AbortController();
+                |        appendTournamentLog(`Verbinde Spiel ${cfg.gameId}...`);
+                |        try {
+                |            const response = await fetch('/api/tournament/game-stream', {
+                |                method: 'POST',
+                |                headers: { 'Content-Type': 'application/json' },
+                |                body: JSON.stringify({ baseUrl: cfg.baseUrl, token: cfg.token, tournamentId: cfg.tournamentId, gameId: cfg.gameId }),
+                |                signal: tournamentGameAbortController.signal
+                |            });
+                |            if (!response.ok) {
+                |                appendTournamentLog(`Spielstream fehlgeschlagen (${response.status}).`);
+                |                return;
+                |            }
+                |            await readNdjsonStream(response, event => {
+                |                if (!event) return;
+                |                appendTournamentLog(`${event.type}${event.status ? ' status=' + event.status : ''}${event.winner ? ' winner=' + event.winner : ''}${event.uci ? ' move=' + event.uci : ''}`);
+                |                if (event.fen) {
+                |                    renderFen(event.fen);
+                |                    serverStatusText = `Turnier-Spiel ${cfg.gameId}: ${event.status || event.type}`;
+                |                    currentSideToMove = (event.fen.split(' ')[1] || 'w').trim();
+                |                    updateStatusText();
+                |                }
+                |            });
+                |        } catch (error) {
+                |            if (error.name !== 'AbortError') appendTournamentLog('Spielstream getrennt.');
+                |        }
+                |    }
+                |    function stopTournamentStreams() {
+                |        if (tournamentAbortController) tournamentAbortController.abort();
+                |        if (tournamentGameAbortController) tournamentGameAbortController.abort();
+                |        tournamentAbortController = null;
+                |        tournamentGameAbortController = null;
+                |        appendTournamentLog('Streams gestoppt.');
                 |    }
                 |    function maybeAutoBotMove(fen) {
                 |        try {
@@ -561,7 +968,7 @@ object RestServer extends JsonSupport:
                 |    }
                 |    async function fetchGame() {
                 |        try {
-                |            const response = await fetch('/api/view/game'); const data = await response.json();
+                |            const response = await fetchWithTimeout('/api/view/game', {}, 1800); const data = await response.json();
                 |            isGameOver = data.isGameOver;
                 |            challengeActive = (data.statusText || '').startsWith('Challenge aktiv');
                 |            challengeHintFrom = data.challengeHintFrom || null;
@@ -692,7 +1099,7 @@ object RestServer extends JsonSupport:
                 |    async function sendMove(algebraicMove) {
                 |        if ((!gameStarted && !challengeActive) || isGameOver || gameTimedOut) return;
                 |        try {
-                |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: algebraicMove }) });
+                |            const res = await fetchWithTimeout('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: algebraicMove }) }, 6000);
                 |            const data = await res.json();
                 |            if (!data.success && data.message) serverStatusText = "Illegal: " + data.message;
                 |            if (data.success && data.message) transientStatusText = data.message;
@@ -702,7 +1109,7 @@ object RestServer extends JsonSupport:
                 |    }
                 |    async function sendCommand(cmd, options = {}) {
                 |        try {
-                |            const res = await fetch('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: cmd }) });
+                |            const res = await fetchWithTimeout('/api/controller/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: cmd }) }, 6000);
                 |            const data = await res.json();
                 |            if (data.message) {
                 |               if (cmd.includes('export')) {
@@ -750,6 +1157,7 @@ object RestServer extends JsonSupport:
                 |    document.getElementById('time-mode').addEventListener('change', () => {
                 |        if (!gameStarted) resetClocksToSelection();
                 |    });
+                |    renderFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
                 |    resetClocksToSelection();
                 |    fetchGame();
                 |</script>
@@ -772,6 +1180,36 @@ object RestServer extends JsonSupport:
                 }
               }
             }
+          }
+        },
+        pathPrefix("api" / "tournament") {
+          post {
+            concat(
+              path("list") {
+                entity(as[TournamentListRequest]) { req =>
+                  onComplete(fetchTournamentList(req)) {
+                    case Success(response) => complete(response)
+                    case Failure(ex)       => complete(TournamentProxyResponse(success = false, 500, "", Some(ex.getMessage)))
+                  }
+                }
+              },
+              path("stream") {
+                entity(as[TournamentStreamRequest]) { req =>
+                  onComplete(proxyTournamentStream(req.baseUrl, req.token, req.tournamentId, None)) {
+                    case Success(response) => complete(response)
+                    case Failure(ex)       => complete(HttpResponse(StatusCodes.BadGateway, entity = ex.getMessage))
+                  }
+                }
+              },
+              path("game-stream") {
+                entity(as[TournamentGameStreamRequest]) { req =>
+                  onComplete(proxyTournamentStream(req.baseUrl, req.token, req.tournamentId, Some(req.gameId))) {
+                    case Success(response) => complete(response)
+                    case Failure(ex)       => complete(HttpResponse(StatusCodes.BadGateway, entity = ex.getMessage))
+                  }
+                }
+              }
+            )
           }
         },
         pathPrefix("api" / "view") {
@@ -801,6 +1239,12 @@ object RestServer extends JsonSupport:
                     )
                     )
                 }
+              },
+              path("statistics") {
+                onComplete(controllerClient.fetchStatistics()) {
+                  case Success(statistics) => complete(statistics)
+                  case Failure(ex)         => failWith(ex)
+                }
               }
             )
           }
@@ -812,4 +1256,61 @@ object RestServer extends JsonSupport:
     println("Proxy endpoints ready:")
     println("  POST /api/controller/update")
     println("  GET  /api/view/game")
+    println("  GET  /api/view/statistics")
     Await.result(system.whenTerminated, Duration.Inf)
+
+  private def cleanTournamentBaseUrl(baseUrl: String): String =
+    baseUrl.trim.stripSuffix("/")
+
+  private def tournamentHeaders(token: Option[String]): List[HttpHeader] =
+    RawHeader("Accept", "application/x-ndjson") ::
+      token.filter(_.trim.nonEmpty).map(value => Authorization(OAuth2BearerToken(value.trim))).toList
+
+  private def tournamentListHeaders(token: Option[String]): List[HttpHeader] =
+    RawHeader("Accept", "application/json") ::
+      token.filter(_.trim.nonEmpty).map(value => Authorization(OAuth2BearerToken(value.trim))).toList
+
+  private def fetchTournamentList(req: TournamentListRequest)(implicit
+      system: ActorSystem[?],
+      ec: ExecutionContext
+  ): Future[TournamentProxyResponse] =
+    val request = HttpRequest(
+      uri = s"${cleanTournamentBaseUrl(req.baseUrl)}/api/tournament",
+      headers = tournamentListHeaders(req.token)
+    )
+    Http().singleRequest(request).flatMap { response =>
+      response.entity.toStrict(5.seconds).map { strict =>
+        val body = strict.data.utf8String
+        TournamentProxyResponse(response.status.isSuccess(), response.status.intValue(), body, if response.status.isSuccess() then None else Some(body))
+      }
+    }
+
+  private def proxyTournamentStream(
+      baseUrl: String,
+      token: String,
+      tournamentId: String,
+      gameId: Option[String]
+  )(implicit
+      system: ActorSystem[?],
+      ec: ExecutionContext
+  ): Future[HttpResponse] =
+    val suffix = gameId match
+      case Some(id) => s"/api/tournament/$tournamentId/game/$id/stream"
+      case None     => s"/api/tournament/$tournamentId/stream"
+    val request = HttpRequest(
+      uri = s"${cleanTournamentBaseUrl(baseUrl)}$suffix",
+      headers = tournamentHeaders(Some(token))
+    )
+    Http().singleRequest(request).flatMap { response =>
+      if response.status.isSuccess() then
+        Future.successful(
+          HttpResponse(
+            status = StatusCodes.OK,
+            entity = HttpEntity.Chunked.fromData(ContentTypes.`application/octet-stream`, response.entity.dataBytes)
+          )
+        )
+      else
+        response.entity.toStrict(2.seconds).map { strict =>
+          HttpResponse(status = response.status, entity = strict.data.utf8String)
+        }
+    }

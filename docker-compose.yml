@@ -27,12 +27,16 @@ services:
         condition: service_healthy
       mongo-db:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       MAIN_CLASS: ch.tichess.services.ControllerServer
       CONTROLLER_SERVICE_PORT: "8082"
       MODEL_SERVICE_URL: http://model-service:8081
       DB_TYPE: mongo
       MONGO_URI: mongodb://mongo-db:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_GAME_EVENTS_TOPIC: tichess.game-events
       JAVA_OPTS: -XX:MaxRAMPercentage=75
     ports:
       - "8082:8082"
@@ -114,6 +118,7 @@ services:
       - |
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic tichess.commands --partitions 1 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic tichess.events --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic tichess.game-events --partitions 1 --replication-factor 1
 
   stream-service:
     <<: *tichess-service
@@ -139,6 +144,20 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
+
+  spark-analytics:
+    <<: *tichess-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      mongo-db:
+        condition: service_healthy
+    environment:
+      MAIN_CLASS: ch.tichess.analytics.ChessSparkAnalytics
+      APP_ARGS: kafka kafka:19092 tichess.game-events
+      MONGO_URI: mongodb://mongo-db:27017
+      SPARK_CHECKPOINT_LOCATION: /tmp/tichess-spark-checkpoint
+      JAVA_OPTS: --add-exports=java.base/sun.nio.ch=ALL-UNNAMED -XX:MaxRAMPercentage=75
 
   lichess-bot:
     <<: *tichess-service

@@ -1,7 +1,6 @@
-{"line":1,"input":"new","accepted":true,"success":true,"message":"Neues Spiel gestartet.","fen":"start"}
-{"line":2,"input":"e2 e4","accepted":true,"success":true,"message":"Move played.","fen":"fen-after-e4"}
-{"line":3,"input":"e7 e5","accepted":true,"success":true,"message":"Move played.","fen":"fen-after-e5"}
-{"line":4,"input":"resign","accepted":true,"success":true,"message":"Black gibt auf. White gewinnt!","fen":"fen-white-wins"}
-{"line":5,"input":"new","accepted":true,"success":true,"message":"Neues Spiel gestartet.","fen":"start"}
-{"line":6,"input":"resign","accepted":true,"success":true,"message":"White gibt auf. Black gewinnt!","fen":"fen-black-wins"}
-{"line":7,"input":"bad command","accepted":false,"success":false,"message":"Invalid command.","fen":null}
+{"eventId":"event-1","gameId":"game-1","eventType":"GameStarted","command":"new","winner":null,"result":null,"moveCount":0,"timestamp":1718712000000,"fen":"start"}
+{"eventId":"event-2","gameId":"game-1","eventType":"MovePlayed","command":"e2 e4","winner":null,"result":null,"moveCount":1,"timestamp":1718712001000,"fen":"fen-after-e4"}
+{"eventId":"event-3","gameId":"game-1","eventType":"GameFinished","command":"resign","winner":"White","result":"resignation","moveCount":2,"timestamp":1718712002000,"fen":"fen-white-wins"}
+{"eventId":"event-4","gameId":"game-2","eventType":"GameStarted","command":"new","winner":null,"result":null,"moveCount":0,"timestamp":1718712003000,"fen":"start"}
+{"eventId":"event-5","gameId":"game-2","eventType":"GameFinished","command":"resign","winner":"Black","result":"resignation","moveCount":0,"timestamp":1718712004000,"fen":"fen-black-wins"}
+{"eventId":"event-6","gameId":"game-3","eventType":"GameFinished","command":"accept","winner":null,"result":"draw","moveCount":20,"timestamp":1718712005000,"fen":"fen-draw"}

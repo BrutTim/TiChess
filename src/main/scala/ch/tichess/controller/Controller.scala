@@ -102,6 +102,8 @@ final case class UpdateResult(state: AppState, message: Option[String], quit: Bo
   def game: Game = state.game
 
 object Controller:
+  private val interactiveBotThinkTimeMs = 300L
+
   lazy val openingDb: ch.tichess.bot.PgnOpeningDatabase = {
     import scala.concurrent.ExecutionContext.Implicits.global
     val db = new ch.tichess.bot.PgnOpeningDatabase()
@@ -228,7 +230,7 @@ object Controller:
       modelService: ModelService,
       challengeLookup: String => Future[Option[ChallengeRecord]] = _ => Future.successful(None),
       randomChallenge: () => Future[Option[ChallengeRecord]] = () => Future.successful(None),
-      botFactory: () => ch.tichess.bot.ChessBot = () => new ch.tichess.bot.AlphaBetaBot(10000L, Some(openingDb))
+      botFactory: () => ch.tichess.bot.ChessBot = () => new ch.tichess.bot.AlphaBetaBot(interactiveBotThinkTimeMs, openingDb = None)
   )(implicit ec: ExecutionContext): Future[UpdateResult] =
     Command.parse(input) match
       case Left(err) => Future.successful(UpdateResult(state, Some(err), quit = false))

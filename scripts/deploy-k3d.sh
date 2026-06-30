@@ -44,6 +44,7 @@ kubectl -n tichess rollout status deployment/model-service --timeout=1200s
 kubectl -n tichess rollout status deployment/controller-service --timeout=1200s
 kubectl -n tichess rollout status deployment/view-service --timeout=1200s
 kubectl -n tichess rollout status deployment/stream-service --timeout=1200s
+kubectl -n tichess rollout status deployment/spark-analytics --timeout=1200s
 
 echo "TiChess is available at http://localhost:8080"
 if [[ -z "${LICHESS_TOKEN:-}" ]]; then

@@ -1,5 +1,6 @@
 package ch.tichess.view
 
+import ch.tichess.analytics.{GameEvent, PlayerStatistics}
 import org.scalatest.funsuite.AnyFunSuite
 import spray.json._
 
@@ -41,5 +42,14 @@ class JsonSupportSpec extends AnyFunSuite with JsonSupport {
     )
     val json = res.toJson
     assert(json.convertTo[StateResponse] == res)
+  }
+
+  test("analytics models serialize and deserialize") {
+    val event = GameEvent("event", "game", "GameFinished", "resign", Some("Black"), Some("resignation"), 12, 123, "fen")
+    val statistics = PlayerStatistics("Black", 4, 2, 1, 1, 7, 456)
+
+    assert(event.toJson.convertTo[GameEvent] == event)
+    assert(statistics.toJson.convertTo[PlayerStatistics] == statistics)
+    assert(List(statistics).toJson.convertTo[List[PlayerStatistics]] == List(statistics))
   }
 }

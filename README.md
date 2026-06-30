@@ -17,7 +17,7 @@ TiChess ist ein Schachprojekt in Scala 3.3.4. Es kombiniert eine funktionale Sch
 
 ## Architektur
 
-Die Docker-Anwendung ist in vier Anwendungsservices aufgeteilt:
+Die Docker-Anwendung ist in fünf Anwendungsservices aufgeteilt:
 
 - `model-service`
   - führt die fachliche Spiellogik aus
@@ -37,11 +37,23 @@ Die Docker-Anwendung ist in vier Anwendungsservices aufgeteilt:
   - stellt einen Kafka Producer und Consumer bereit
   - konsumiert `tichess.commands` und publiziert Ergebnisse nach `tichess.events`
   - kommuniziert per HTTP mit dem `controller-service`
+- `spark-analytics`
+  - konsumiert strukturierte Spielereignisse aus `tichess.game-events`
+  - berechnet eine Bestenliste für White und Black
+  - speichert Spiele, Siege, Remis, Niederlagen und Punkte in MongoDB
+  - stellt die Daten indirekt über Controller und Web-UI bereit
 
 Datenfluss:
 
 ```text
 Browser -> view-service -> controller-service -> model-service
+                                |
+                                v
+                         tichess.game-events
+                                |
+                                v
+                       spark-analytics -> MongoDB -> Web-UI
+
 DSL/Kafka -> stream-service -> controller-service -> model-service
 ```
 
@@ -146,11 +158,16 @@ Datei-basierte Auswertung starten:
 sbt "runMain ch.tichess.analytics.ChessSparkAnalytics file examples/spark-game-events.jsonl"
 ```
 
-Kafka-Stream aus dem bestehenden Topic `tichess.events` lesen:
+Kafka-Stream aus dem fachlichen Topic `tichess.game-events` lesen:
 
 ```bash
-sbt "runMain ch.tichess.analytics.ChessSparkAnalytics kafka localhost:9092 tichess.events"
+sbt "runMain ch.tichess.analytics.ChessSparkAnalytics kafka localhost:9092 tichess.game-events"
 ```
+
+Bei `docker compose up --build` startet `spark-analytics` automatisch. Echte
+Züge und Spielenden aus der Web-UI werden vom Controller nach Kafka
+veröffentlicht. Die daraus berechnete White/Black-Bestenliste erscheint im
+Statistik-Tab der Web-UI.
 
 ## Lichess-Bot mit Docker Compose
 
@@ -435,6 +452,7 @@ Wichtige Umgebungsvariablen:
 - `KAFKA_BOOTSTRAP_SERVERS` Standard lokal `localhost:9092`
 - `KAFKA_COMMANDS_TOPIC` Standard `tichess.commands`
 - `KAFKA_EVENTS_TOPIC` Standard `tichess.events`
+- `KAFKA_GAME_EVENTS_TOPIC` Standard `tichess.game-events`
 - `KAFKA_CONSUMER_GROUP` Standard `tichess-stream-service`
 
 ## HTTP-Endpunkte

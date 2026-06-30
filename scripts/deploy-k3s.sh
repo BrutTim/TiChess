@@ -36,6 +36,7 @@ sudo k3s kubectl -n tichess rollout status deployment/model-service --timeout=12
 sudo k3s kubectl -n tichess rollout status deployment/controller-service --timeout=1200s
 sudo k3s kubectl -n tichess rollout status deployment/view-service --timeout=1200s
 sudo k3s kubectl -n tichess rollout status deployment/stream-service --timeout=1200s
+sudo k3s kubectl -n tichess rollout status deployment/spark-analytics --timeout=1200s
 
 echo "TiChess is available on this server's port 80."
 if [[ -z "${LICHESS_TOKEN:-}" ]]; then

@@ -2,73 +2,80 @@ package ch.tichess.analytics
 
 import org.apache.spark.sql.functions.*
 import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.types.{BooleanType, LongType, StringType, StructField, StructType}
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.mongodb.scala.*
+import org.mongodb.scala.model.{Filters, ReplaceOptions}
+
+import scala.concurrent.duration.*
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 object ChessSparkAnalytics:
 
   val eventSchema: StructType =
     StructType(
       Seq(
-        StructField("line", LongType, nullable = false),
-        StructField("input", StringType, nullable = false),
-        StructField("accepted", BooleanType, nullable = false),
-        StructField("success", BooleanType, nullable = false),
-        StructField("message", StringType, nullable = true),
-        StructField("fen", StringType, nullable = true)
+        StructField("eventId", StringType, nullable = false),
+        StructField("gameId", StringType, nullable = false),
+        StructField("eventType", StringType, nullable = false),
+        StructField("command", StringType, nullable = false),
+        StructField("winner", StringType, nullable = true),
+        StructField("result", StringType, nullable = true),
+        StructField("moveCount", LongType, nullable = false),
+        StructField("timestamp", LongType, nullable = false),
+        StructField("fen", StringType, nullable = false)
       )
     )
 
-  def withMetrics(events: DataFrame): DataFrame =
+  def playerOutcomes(events: DataFrame): DataFrame =
     events
-      .withColumn("messageText", coalesce(col("message"), lit("")))
-      .withColumn(
-        "winner",
-        when(
-          col("success") &&
-            (lower(col("messageText")).contains("white wins") ||
-              lower(col("messageText")).contains("white gewinnt")),
-          lit("White")
-        ).when(
-          col("success") &&
-            (lower(col("messageText")).contains("black wins") ||
-              lower(col("messageText")).contains("black gewinnt")),
-          lit("Black")
-        ).otherwise(lit(null))
+      .filter(col("eventType") === "GameFinished")
+      .select(
+        explode(
+          array(
+            struct(
+              lit("White").as("player"),
+              when(col("winner") === "White", lit("win"))
+                .when(col("winner").isNull, lit("draw"))
+                .otherwise(lit("loss"))
+                .as("outcome")
+            ),
+            struct(
+              lit("Black").as("player"),
+              when(col("winner") === "Black", lit("win"))
+                .when(col("winner").isNull, lit("draw"))
+                .otherwise(lit("loss"))
+                .as("outcome")
+            )
+          )
+        ).as("entry")
       )
-      .withColumn(
-        "draw",
-        col("success") &&
-          (lower(col("messageText")).contains("draw") ||
-            lower(col("messageText")).startsWith("spiel durch remis") ||
-            lower(col("messageText")).contains("remis (laut pgn)"))
-      )
-      .withColumn(
-        "score",
-        when(col("winner").isNotNull, lit(3))
-          .when(col("draw"), lit(1))
-          .when(col("success"), lit(0))
-          .otherwise(lit(-1))
-      )
+      .select("entry.*")
 
   def aggregate(events: DataFrame): DataFrame =
-    withMetrics(events)
-      .groupBy(col("winner").as("player"))
+    playerOutcomes(events)
+      .groupBy("player")
       .agg(
-        count(when(col("success"), true)).as("successfulEvents"),
-        count(when(!col("success"), true)).as("failedEvents"),
-        count(when(col("winner").isNotNull, true)).as("victories"),
-        count(when(col("draw"), true)).as("draws"),
-        sum(col("score")).as("score")
+        count(lit(1)).as("games"),
+        count(when(col("outcome") === "win", true)).as("victories"),
+        count(when(col("outcome") === "draw", true)).as("draws"),
+        count(when(col("outcome") === "loss", true)).as("losses"),
+        sum(
+          when(col("outcome") === "win", 3)
+            .when(col("outcome") === "draw", 1)
+            .otherwise(0)
+        ).as("score")
       )
-      .na
-      .fill("No winner", Seq("player"))
       .orderBy(col("score").desc, col("victories").desc, col("player"))
 
   def readEventsFromFile(spark: SparkSession, path: String): DataFrame =
     spark.read.schema(eventSchema).json(path)
 
-  def readEventsFromKafka(spark: SparkSession, bootstrapServers: String, topic: String): DataFrame =
+  def readEventsFromKafka(
+      spark: SparkSession,
+      bootstrapServers: String,
+      topic: String
+  ): DataFrame =
     spark.readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", bootstrapServers)
@@ -78,12 +85,48 @@ object ChessSparkAnalytics:
       .selectExpr("CAST(value AS STRING) AS json")
       .select(from_json(col("json"), eventSchema).as("event"))
       .select("event.*")
+      .filter(col("eventId").isNotNull)
+
+  private def statisticsDocument(row: Row, updatedAt: Long): Document =
+    Document(
+      "_id" -> row.getAs[String]("player"),
+      "games" -> row.getAs[Long]("games"),
+      "victories" -> row.getAs[Long]("victories"),
+      "draws" -> row.getAs[Long]("draws"),
+      "losses" -> row.getAs[Long]("losses"),
+      "score" -> row.getAs[Long]("score"),
+      "updatedAt" -> updatedAt
+    )
+
+  def writeStatistics(batch: DataFrame, mongoUri: String): Unit =
+    given ExecutionContext = ExecutionContext.global
+    val rows = batch.collect().toSeq
+    if rows.nonEmpty then
+      val client = MongoClient(mongoUri)
+      try
+        val collection = client
+          .getDatabase("tichess")
+          .getCollection("player_statistics")
+        val updatedAt = System.currentTimeMillis()
+        val writes = rows.map { row =>
+          val document = statisticsDocument(row, updatedAt)
+          collection
+            .replaceOne(
+              Filters.equal("_id", row.getAs[String]("player")),
+              document,
+              ReplaceOptions().upsert(true)
+            )
+            .toFuture()
+        }
+        Await.result(Future.sequence(writes), 30.seconds)
+      finally client.close()
 
   def sparkSession(appName: String): SparkSession =
     SparkSession
       .builder()
       .appName(appName)
       .master(sys.env.getOrElse("SPARK_MASTER", "local[*]"))
+      .config("spark.ui.enabled", "false")
       .getOrCreate()
 
   def main(args: Array[String]): Unit =
@@ -96,12 +139,23 @@ object ChessSparkAnalytics:
 
       case "kafka" :: bootstrapServers :: topic :: Nil =>
         val spark = sparkSession("TiChessSparkKafkaAnalytics")
+        val mongoUri = sys.env.getOrElse("MONGO_URI", "mongodb://localhost:27017")
+        val checkpoint =
+          sys.env.getOrElse(
+            "SPARK_CHECKPOINT_LOCATION",
+            "/tmp/tichess-spark-checkpoint"
+          )
+
+        val persistBatch: (DataFrame, Long) => Unit = (batch, _) =>
+          batch.show(truncate = false)
+          writeStatistics(batch, mongoUri)
+
         aggregate(readEventsFromKafka(spark, bootstrapServers, topic))
           .writeStream
           .outputMode("complete")
-          .format("console")
-          .option("truncate", "false")
+          .option("checkpointLocation", checkpoint)
           .trigger(Trigger.ProcessingTime("5 seconds"))
+          .foreachBatch(persistBatch)
           .start()
           .awaitTermination()
 
@@ -109,7 +163,7 @@ object ChessSparkAnalytics:
         System.err.println(
           """Usage:
             |  sbt "runMain ch.tichess.analytics.ChessSparkAnalytics file examples/spark-game-events.jsonl"
-            |  sbt "runMain ch.tichess.analytics.ChessSparkAnalytics kafka localhost:9092 tichess.events"
+            |  sbt "runMain ch.tichess.analytics.ChessSparkAnalytics kafka localhost:9092 tichess.game-events"
             |""".stripMargin
         )
         sys.exit(1)
