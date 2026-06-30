@@ -89,9 +89,16 @@ object RestServer extends JsonSupport:
                 |            color: #f8ead0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
                 |        }
                 |        .main-layout {
-                |            flex: 1; display: grid; grid-template-columns: minmax(28rem, 1fr) minmax(22rem, 27rem);
-                |            gap: clamp(1rem, 2.8vw, 2.25rem); align-items: start;
-                |            width: min(100%, 96rem); margin: 0 auto; padding: clamp(1rem, 2.6vw, 2.5rem);
+                |            flex: 1; display: grid; grid-template-columns: 13.5rem minmax(28rem, 1fr) minmax(22rem, 27rem);
+                |            gap: clamp(1rem, 2.6vw, 2.1rem); align-items: start;
+                |            width: 100%; margin: 0; padding: 0 clamp(1rem, 2.4vw, 2.35rem) clamp(1rem, 2.4vw, 2.35rem) 0;
+                |        }
+                |        .main-layout.panel-only {
+                |            grid-template-columns: 13.5rem minmax(0, 1fr);
+                |        }
+                |        .main-layout.panel-only .board-area { display: none; }
+                |        .main-layout.panel-only .sidebar {
+                |            grid-column: 2; max-width: min(88rem, 100%); min-height: auto; position: static;
                 |        }
                 |        .board-area {
                 |            min-height: calc(100vh - 7rem); display: grid; place-items: start center;
@@ -205,6 +212,12 @@ object RestServer extends JsonSupport:
                 |        .action-btn.new-game { background: rgba(105,127,79,0.28); border-color: rgba(136,157,94,0.5); }
                 |        .action-btn.new-game:hover:not(:disabled) { background: rgba(105,127,79,0.46); }
                 |        .captured-pieces { font-size: 1.15rem; min-height: 1.35rem; letter-spacing: 2px; color: var(--text-color); margin: 0; }
+                |        .side-nav {
+                |            position: sticky; top: 4.5rem; min-height: calc(100vh - 4.5rem);
+                |            background: rgba(28, 27, 22, 0.94); border: 1px solid var(--border);
+                |            border-left: 0; border-top: 0; border-radius: 0 0.45rem 0.45rem 0;
+                |            padding: 0.9rem 0.8rem; display: flex; flex-direction: column; gap: 1rem;
+                |        }
                 |        .sidebar {
                 |            background: rgba(36, 35, 29, 0.92); border: 1px solid var(--border); border-radius: 0.45rem; padding: 1rem;
                 |            display: flex; flex-direction: column; gap: 1rem; min-width: 0; width: 100%;
@@ -212,22 +225,24 @@ object RestServer extends JsonSupport:
                 |            position: sticky; top: 6rem;
                 |        }
                 |        .tab-bar {
-                |            display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem;
-                |            background: rgba(23, 22, 18, 0.72); border: 1px solid var(--border);
-                |            border-radius: 0.45rem; padding: 0.3rem;
+                |            display: grid; grid-template-columns: 1fr; gap: 0.35rem;
                 |        }
                 |        .tab-btn {
-                |            border: 0; border-radius: 0.35rem; padding: 0.78rem 0.85rem; text-align: center;
+                |            border: 0; border-radius: 0.35rem; padding: 0.78rem 0.8rem; text-align: left;
                 |            background: transparent; color: var(--muted); cursor: pointer; transition: all 0.2s ease;
-                |            display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+                |            display: flex; align-items: center; gap: 0.7rem; min-height: 3.1rem;
                 |        }
                 |        .tab-btn:hover { background: rgba(255,255,255,0.06); color: #f8fafc; }
                 |        .tab-btn.active {
                 |            background: rgba(214, 155, 59, 0.22);
                 |            color: #fff6df; box-shadow: inset 0 0 0 1px rgba(214, 155, 59, 0.22);
                 |        }
-                |        .tab-icon { font-size: 1.2rem; line-height: 1; }
-                |        .tab-label { font-size: 0.98rem; font-weight: 700; }
+                |        .tab-icon {
+                |            width: 2rem; height: 2rem; border-radius: 0.35rem; display: grid; place-items: center;
+                |            background: rgba(255,255,255,0.06); color: #f2ddb5; font-size: 0.78rem; font-weight: 900;
+                |            flex: 0 0 auto;
+                |        }
+                |        .tab-label { font-size: 0.98rem; font-weight: 800; }
                 |        .sr-only {
                 |            position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
                 |            overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
@@ -240,7 +255,10 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .panel-card h3 { margin: 0; font-size: 1.05rem; }
                 |        .mini-title { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 1rem; }
-                |        .mini-icon { font-size: 1.05rem; }
+                |        .mini-icon {
+                |            width: 1.8rem; height: 1.8rem; border-radius: 0.35rem; display: grid; place-items: center;
+                |            background: rgba(214,155,59,0.14); color: #f2ddb5; font-size: 0.72rem; font-weight: 900;
+                |        }
                 |        .move-list {
                 |            height: clamp(12rem, 30vh, 22rem); overflow-y: auto; background: rgba(23,22,18,0.48); border-radius: 0.35rem;
                 |            padding: 0.6rem; font-family: monospace; font-size: 0.95rem; border: 1px solid var(--border);
@@ -293,8 +311,9 @@ object RestServer extends JsonSupport:
                 |        }
                 |        .tournament-entry {
                 |            padding: 0.65rem; border: 1px solid rgba(255,255,255,0.08); border-radius: 0.35rem;
-                |            background: rgba(255,255,255,0.035);
+                |            background: rgba(255,255,255,0.035); cursor: pointer;
                 |        }
+                |        .tournament-entry:hover { border-color: rgba(216,189,119,0.36); background: rgba(255,255,255,0.055); }
                 |        .tournament-entry-header {
                 |            display: flex; justify-content: space-between; gap: 0.75rem; align-items: flex-start;
                 |        }
@@ -305,6 +324,22 @@ object RestServer extends JsonSupport:
                 |            padding: 0.12rem 0.45rem; font-size: 0.72rem; font-weight: 900; text-transform: uppercase;
                 |        }
                 |        .tournament-meta { margin-top: 0.45rem; color: var(--muted); font-size: 0.78rem; }
+                |        .tournament-players, .tournament-games {
+                |            margin-top: 0.6rem; padding-top: 0.55rem; border-top: 1px solid rgba(255,255,255,0.08);
+                |            display: grid; gap: 0.4rem; color: #eadfc7; font-size: 0.82rem;
+                |        }
+                |        .tournament-player, .tournament-game {
+                |            display: flex; justify-content: space-between; gap: 0.6rem;
+                |            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                |        }
+                |        .tournament-player-name { overflow-wrap: anywhere; }
+                |        .tournament-player-score { color: var(--muted); flex: 0 0 auto; }
+                |        .tournament-game {
+                |            width: 100%; border: 1px solid rgba(255,255,255,0.08); border-radius: 0.35rem;
+                |            padding: 0.6rem 0.65rem; background: rgba(23,22,18,0.38); color: #fff5dd; cursor: pointer; font-weight: 800;
+                |        }
+                |        .tournament-game:hover { border-color: rgba(216,189,119,0.4); background: rgba(216,189,119,0.12); }
+                |        .tournament-game span:last-child { color: var(--muted); flex: 0 0 auto; }
                 |        .tournament-list button {
                 |            margin-top: 0.45rem; width: 100%;
                 |        }
@@ -318,7 +353,9 @@ object RestServer extends JsonSupport:
                 |            .clock-row { right: -7.8rem; }
                 |        }
                 |        @media (max-width: 1120px) {
-                |            .main-layout { grid-template-columns: 1fr; }
+                |            .main-layout, .main-layout.panel-only { grid-template-columns: 1fr; }
+                |            .main-layout.panel-only .sidebar { grid-column: auto; max-width: none; }
+                |            .side-nav { position: static; min-height: auto; }
                 |            .board-area { min-height: auto; padding-top: 0.5rem; }
                 |            .board-panel { width: min(100%, 42rem); min-width: 0; }
                 |            .sidebar { position: static; min-height: auto; }
@@ -345,7 +382,31 @@ object RestServer extends JsonSupport:
                 |    </div>
                 |    <div id="status" class="status">Connecting...</div>
                 |</header>
-                |<main class="main-layout">
+                |<main id="main-layout" class="main-layout">
+                |<nav class="side-nav" aria-label="Hauptnavigation">
+                |    <div class="tab-bar" role="tablist" aria-label="Schach Seitenbereich">
+                |        <button id="tab-btn-game" class="tab-btn active" type="button" role="tab" aria-selected="true" aria-controls="tab-game" onclick="switchTab('game')">
+                |            <span class="tab-icon" aria-hidden="true">SP</span>
+                |            <span class="tab-label">Spiel</span>
+                |        </button>
+                |        <button id="tab-btn-io" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-io" onclick="switchTab('io')">
+                |            <span class="tab-icon" aria-hidden="true">PGN</span>
+                |            <span class="tab-label">Notation</span>
+                |        </button>
+                |        <button id="tab-btn-challenges" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-challenges" onclick="switchTab('challenges')">
+                |            <span class="tab-icon" aria-hidden="true">TR</span>
+                |            <span class="tab-label">Training</span>
+                |        </button>
+                |        <button id="tab-btn-tournament" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-tournament" onclick="switchTab('tournament')">
+                |            <span class="tab-icon" aria-hidden="true">TN</span>
+                |            <span class="tab-label">Turnier</span>
+                |        </button>
+                |        <button id="tab-btn-statistics" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-statistics" onclick="switchTab('statistics')">
+                |            <span class="tab-icon" aria-hidden="true">ST</span>
+                |            <span class="tab-label">Statistik</span>
+                |        </button>
+                |    </div>
+                |</nav>
                 |<section class="board-area" aria-label="Schachbrett">
                 |    <div class="board-panel">
                 |        <div class="clock-row">
@@ -366,31 +427,9 @@ object RestServer extends JsonSupport:
                 |    </div>
                 |</section>
                 |<div class="sidebar">
-                |    <div class="tab-bar" role="tablist" aria-label="Schach Seitenbereich">
-                |        <button id="tab-btn-game" class="tab-btn active" type="button" role="tab" aria-selected="true" aria-controls="tab-game" onclick="switchTab('game')">
-                |            <span class="tab-icon" aria-hidden="true">&#x265E;&#xFE0E;</span>
-                |            <span class="tab-label sr-only">Spiel</span>
-                |        </button>
-                |        <button id="tab-btn-io" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-io" onclick="switchTab('io')">
-                |            <span class="tab-icon" aria-hidden="true">📄</span>
-                |            <span class="tab-label sr-only">Import / Export</span>
-                |        </button>
-                |        <button id="tab-btn-challenges" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-challenges" onclick="switchTab('challenges')">
-                |            <span class="tab-icon" aria-hidden="true">🧩</span>
-                |            <span class="tab-label sr-only">Challenges</span>
-                |        </button>
-                |        <button id="tab-btn-tournament" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-tournament" onclick="switchTab('tournament')">
-                |            <span class="tab-icon" aria-hidden="true">&#x265C;&#xFE0E;</span>
-                |            <span class="tab-label sr-only">Turnier</span>
-                |        </button>
-                |        <button id="tab-btn-statistics" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="tab-statistics" onclick="switchTab('statistics')">
-                |            <span class="tab-icon" aria-hidden="true">&#x2605;</span>
-                |            <span class="tab-label sr-only">Statistik</span>
-                |        </button>
-                |    </div>
                 |    <section id="tab-game" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-game">
                 |        <div class="panel-card">
-                |            <h3 class="mini-title"><span class="mini-icon">⚡</span><span>Start</span></h3>
+                |            <h3 class="mini-title"><span class="mini-icon">01</span><span>Start</span></h3>
                 |            <div class="future-controls">
                 |                <div class="field-group">
                 |                    <label for="time-mode">Zeitmodus</label>
@@ -410,7 +449,7 @@ object RestServer extends JsonSupport:
                 |            </div>
                 |        </div>
                 |        <div class="panel-card">
-                |            <h3 class="mini-title"><span class="mini-icon">🕹️</span><span>Aktionen</span></h3>
+                |            <h3 class="mini-title"><span class="mini-icon">02</span><span>Aktionen</span></h3>
                 |            <div class="action-grid">
                 |                <button id="btn-draw" class="action-btn" onclick="sendCommand('draw')">Remis anbieten</button>
                 |                <button id="btn-resign" class="action-btn resign" onclick="sendCommand('resign')">Aufgeben</button>
@@ -420,13 +459,13 @@ object RestServer extends JsonSupport:
                 |            </div>
                 |        </div>
                 |        <div class="panel-card">
-                |            <h3 class="mini-title"><span class="mini-icon">📜</span><span>Zughistorie</span></h3>
+                |            <h3 class="mini-title"><span class="mini-icon">03</span><span>Zughistorie</span></h3>
                 |            <div id="move-list" class="move-list"></div>
                 |        </div>
                 |    </section>
                 |    <section id="tab-io" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-io">
                 |        <div class="panel-card">
-                |            <h3 class="mini-title"><span class="mini-icon">🧩</span><span>Notation</span></h3>
+                |            <h3 class="mini-title"><span class="mini-icon">PGN</span><span>Notation</span></h3>
                 |            <div class="notation-box">
                 |                <div class="field-group">
                 |                    <label for="parser-select">Parser / Notation</label>
@@ -457,7 +496,7 @@ object RestServer extends JsonSupport:
                 |    </section>
                 |    <section id="tab-tournament" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-tournament">
                 |        <div class="panel-card">
-                |            <h3 class="mini-title"><span class="mini-icon">&#x265C;&#xFE0E;</span><span>Turnier</span></h3>
+                |            <h3 class="mini-title"><span class="mini-icon">TN</span><span>Turnier</span></h3>
                 |            <div class="future-controls">
                 |                <div class="field-group">
                 |                    <label for="tournament-base-url">Server</label>
@@ -705,6 +744,7 @@ object RestServer extends JsonSupport:
                 |            document.getElementById('tab-btn-' + tab).setAttribute('aria-selected', String(active));
                 |            document.getElementById('tab-' + tab).classList.toggle('active', active);
                 |        });
+                |        document.getElementById('main-layout').classList.toggle('panel-only', tabName === 'tournament' || tabName === 'statistics');
                 |        if (tabName === 'statistics') startStatisticsPolling(); else stopStatisticsPolling();
                 |    }
                 |    function startStatisticsPolling() {
@@ -755,6 +795,107 @@ object RestServer extends JsonSupport:
                 |        log.textContent = (log.textContent === 'Bereit.' ? '' : log.textContent + '\n') + `[${timestamp}] ${text}`;
                 |        log.scrollTop = log.scrollHeight;
                 |    }
+                |    function renderTournamentPlayers(entry, tournament) {
+                |        entry.querySelectorAll('.tournament-players').forEach(node => node.remove());
+                |        const panel = document.createElement('div');
+                |        panel.className = 'tournament-players';
+                |        const players = (tournament.standing && tournament.standing.players) || tournament.players || tournament.participants || [];
+                |        if (!Array.isArray(players) || players.length === 0) {
+                |            panel.textContent = 'Noch keine angemeldeten Spieler gefunden.';
+                |            entry.appendChild(panel);
+                |            return;
+                |        }
+                |        players.forEach(player => {
+                |            const bot = player.bot || player;
+                |            const row = document.createElement('div');
+                |            row.className = 'tournament-player';
+                |            const name = document.createElement('span');
+                |            name.className = 'tournament-player-name';
+                |            name.textContent = bot.name || bot.id || player.name || player.id || 'Bot';
+                |            const score = document.createElement('span');
+                |            score.className = 'tournament-player-score';
+                |            score.textContent = [player.rank ? `#${player.rank}` : null, player.points !== undefined ? `${player.points} P` : null, bot.id || null].filter(Boolean).join(' · ');
+                |            row.appendChild(name);
+                |            row.appendChild(score);
+                |            panel.appendChild(row);
+                |        });
+                |        entry.appendChild(panel);
+                |    }
+                |    function renderTournamentGames(entry, roundData) {
+                |        entry.querySelectorAll('.tournament-games').forEach(node => node.remove());
+                |        const panel = document.createElement('div');
+                |        panel.className = 'tournament-games';
+                |        const pairings = roundData.pairings || [];
+                |        if (!Array.isArray(pairings) || pairings.length === 0) {
+                |            panel.textContent = 'Noch keine Spiele fuer diese Runde gefunden.';
+                |            entry.appendChild(panel);
+                |            return;
+                |        }
+                |        pairings.forEach(pairing => {
+                |            const gameId = pairing.gameId || (pairing.matchResults && pairing.matchResults[0] && pairing.matchResults[0].gameId);
+                |            const white = (pairing.white && (pairing.white.name || pairing.white.id)) || 'White';
+                |            const black = (pairing.black && (pairing.black.name || pairing.black.id)) || 'Black';
+                |            const button = document.createElement('button');
+                |            button.className = 'tournament-game';
+                |            button.type = 'button';
+                |            button.disabled = !gameId;
+                |            const label = document.createElement('span');
+                |            label.textContent = `${white} vs ${black}`;
+                |            const id = document.createElement('span');
+                |            id.textContent = gameId ? `Game ${gameId}` : 'Keine Game-ID';
+                |            button.appendChild(label);
+                |            button.appendChild(id);
+                |            if (gameId) {
+                |                button.onclick = event => {
+                |                    event.stopPropagation();
+                |                    document.getElementById('tournament-game-id').value = gameId;
+                |                    document.getElementById('main-layout').classList.remove('panel-only');
+                |                    connectTournamentGameStream();
+                |                };
+                |            }
+                |            panel.appendChild(button);
+                |        });
+                |        entry.appendChild(panel);
+                |    }
+                |    async function loadTournamentRound(tournamentId, round, entry) {
+                |        const cfg = tournamentConfig();
+                |        if (!cfg.baseUrl || !tournamentId || !round) return;
+                |        try {
+                |            const res = await fetchWithTimeout('/api/tournament/round', {
+                |                method: 'POST',
+                |                headers: { 'Content-Type': 'application/json' },
+                |                body: JSON.stringify({ baseUrl: cfg.baseUrl, token: cfg.token ? cfg.token : null, tournamentId, round })
+                |            }, 5000);
+                |            const data = await res.json();
+                |            if (data.success) renderTournamentGames(entry, JSON.parse(data.body));
+                |        } catch (_) {}
+                |    }
+                |    async function loadTournamentDetails(tournamentId, entry) {
+                |        const cfg = tournamentConfig();
+                |        if (!cfg.baseUrl || !tournamentId) return;
+                |        entry.querySelectorAll('.tournament-players, .tournament-games').forEach(node => node.remove());
+                |        const loading = document.createElement('div');
+                |        loading.className = 'tournament-players';
+                |        loading.textContent = 'Lade Spieler und Spiele...';
+                |        entry.appendChild(loading);
+                |        try {
+                |            const res = await fetchWithTimeout('/api/tournament/detail', {
+                |                method: 'POST',
+                |                headers: { 'Content-Type': 'application/json' },
+                |                body: JSON.stringify({ baseUrl: cfg.baseUrl, token: cfg.token ? cfg.token : null, tournamentId })
+                |            }, 5000);
+                |            const data = await res.json();
+                |            if (!data.success) {
+                |                loading.textContent = data.error || data.body || 'Turnierdetails konnten nicht geladen werden.';
+                |                return;
+                |            }
+                |            const tournament = JSON.parse(data.body);
+                |            renderTournamentPlayers(entry, tournament);
+                |            loadTournamentRound(tournamentId, tournament.round || 1, entry);
+                |        } catch (error) {
+                |            loading.textContent = 'Turnierdetails sind nicht erreichbar.';
+                |        }
+                |    }
                 |    function renderTournamentListBody(body) {
                 |        const target = document.getElementById('tournament-list');
                 |        try {
@@ -787,6 +928,12 @@ object RestServer extends JsonSupport:
                 |                    ].filter(Boolean).join(' • ');
                 |                    const entry = document.createElement('div');
                 |                    entry.className = 'tournament-entry';
+                |                    if (id) {
+                |                        entry.onclick = () => {
+                |                            document.getElementById('tournament-id').value = id;
+                |                            loadTournamentDetails(id, entry);
+                |                        };
+                |                    }
                 |                    const header = document.createElement('div');
                 |                    header.className = 'tournament-entry-header';
                 |                    const titleBlock = document.createElement('div');
@@ -819,7 +966,8 @@ object RestServer extends JsonSupport:
                 |                        button.className = 'action-btn';
                 |                        button.type = 'button';
                 |                        button.textContent = 'Verfolgen';
-                |                        button.onclick = () => {
+                |                        button.onclick = event => {
+                |                            event.stopPropagation();
                 |                            document.getElementById('tournament-id').value = id;
                 |                            connectTournamentStream();
                 |                        };
@@ -1193,6 +1341,22 @@ object RestServer extends JsonSupport:
                   }
                 }
               },
+              path("detail") {
+                entity(as[TournamentDetailRequest]) { req =>
+                  onComplete(fetchTournamentDetail(req)) {
+                    case Success(response) => complete(response)
+                    case Failure(ex)       => complete(TournamentProxyResponse(success = false, 500, "", Some(ex.getMessage)))
+                  }
+                }
+              },
+              path("round") {
+                entity(as[TournamentRoundRequest]) { req =>
+                  onComplete(fetchTournamentRound(req)) {
+                    case Success(response) => complete(response)
+                    case Failure(ex)       => complete(TournamentProxyResponse(success = false, 500, "", Some(ex.getMessage)))
+                  }
+                }
+              },
               path("stream") {
                 entity(as[TournamentStreamRequest]) { req =>
                   onComplete(proxyTournamentStream(req.baseUrl, req.token, req.tournamentId, None)) {
@@ -1276,6 +1440,36 @@ object RestServer extends JsonSupport:
   ): Future[TournamentProxyResponse] =
     val request = HttpRequest(
       uri = s"${cleanTournamentBaseUrl(req.baseUrl)}/api/tournament",
+      headers = tournamentListHeaders(req.token)
+    )
+    Http().singleRequest(request).flatMap { response =>
+      response.entity.toStrict(5.seconds).map { strict =>
+        val body = strict.data.utf8String
+        TournamentProxyResponse(response.status.isSuccess(), response.status.intValue(), body, if response.status.isSuccess() then None else Some(body))
+      }
+    }
+
+  private def fetchTournamentDetail(req: TournamentDetailRequest)(implicit
+      system: ActorSystem[?],
+      ec: ExecutionContext
+  ): Future[TournamentProxyResponse] =
+    val request = HttpRequest(
+      uri = s"${cleanTournamentBaseUrl(req.baseUrl)}/api/tournament/${req.tournamentId.trim}",
+      headers = tournamentListHeaders(req.token)
+    )
+    Http().singleRequest(request).flatMap { response =>
+      response.entity.toStrict(5.seconds).map { strict =>
+        val body = strict.data.utf8String
+        TournamentProxyResponse(response.status.isSuccess(), response.status.intValue(), body, if response.status.isSuccess() then None else Some(body))
+      }
+    }
+
+  private def fetchTournamentRound(req: TournamentRoundRequest)(implicit
+      system: ActorSystem[?],
+      ec: ExecutionContext
+  ): Future[TournamentProxyResponse] =
+    val request = HttpRequest(
+      uri = s"${cleanTournamentBaseUrl(req.baseUrl)}/api/tournament/${req.tournamentId.trim}/round/${req.round}",
       headers = tournamentListHeaders(req.token)
     )
     Http().singleRequest(request).flatMap { response =>
