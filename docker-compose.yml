@@ -180,6 +180,7 @@ services:
       TOURNAMENT_SERVER_URL: ${TOURNAMENT_SERVER_URL:-https://tournament.staging.maichess.berger-software.com}
       TOURNAMENT_ID: ${TOURNAMENT_ID:-}
       TOURNAMENT_TOKEN: ${TOURNAMENT_TOKEN:-}
+      TOURNAMENT_BOT_ID: ${TOURNAMENT_BOT_ID:-}
       TOURNAMENT_BOT_NAME: ${TOURNAMENT_BOT_NAME:-TiChess}
       TOURNAMENT_JOIN: ${TOURNAMENT_JOIN:-true}
       JAVA_OPTS: -XX:MaxRAMPercentage=75

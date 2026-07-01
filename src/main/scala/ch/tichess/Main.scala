@@ -64,20 +64,21 @@ object Main:
     implicit val system: ActorSystem[Nothing] = ActorSystem(Behaviors.empty, "TournamentBotSystem")
     implicit val ec: ExecutionContext = system.executionContext
 
-    val tokenFuture =
+    val identityFuture =
       sys.env.get("TOURNAMENT_TOKEN") match
-        case Some(token) if token.nonEmpty => scala.concurrent.Future.successful(token)
+        case Some(token) if token.nonEmpty =>
+          scala.concurrent.Future.successful((token, sys.env.get("TOURNAMENT_BOT_ID").filter(_.nonEmpty)))
         case _ =>
           ch.tichess.bot.tournament.TournamentClient.registerBot(baseUrl, botName).map { registered =>
             println(s"Registered tournament bot '${botName}' with id ${registered.id}.")
             println(s"Set TOURNAMENT_TOKEN='${registered.token}' to reuse this identity.")
-            registered.token
+            (registered.token, Some(registered.id))
           }
 
-    val token = Await.result(tokenFuture, Duration.Inf)
+    val (token, botId) = Await.result(identityFuture, Duration.Inf)
     val client = new ch.tichess.bot.tournament.TournamentClient(baseUrl, token)
     val bot = new ch.tichess.bot.AlphaBetaBot(10000L, Some(Controller.openingDb))
-    val runner = new ch.tichess.bot.tournament.TournamentBotRunner(client, tournamentId, bot)
+    val runner = new ch.tichess.bot.tournament.TournamentBotRunner(client, tournamentId, bot, botName, botId)
     runner.start(join)
 
     sys.addShutdownHook {

@@ -40,6 +40,12 @@ spec:
                   name: tournament-bot
                   key: token
                   optional: true
+            - name: TOURNAMENT_BOT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tournament-bot
+                  key: bot-id
+                  optional: true
             - name: TOURNAMENT_BOT_NAME
               valueFrom:
                 secretKeyRef:

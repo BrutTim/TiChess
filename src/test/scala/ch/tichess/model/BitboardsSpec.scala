@@ -110,6 +110,12 @@ final class BitboardsSpec extends AnyFunSuite:
     assert(BitboardAttacks.isAttackedBy(bitboards, Color.Black, Pos(4, 0)))
     assert(BitboardAttacks.attacksSquare(bitboards, Pos(2, 2), Piece(Color.Black, PieceType.Knight), Pos(4, 1)))
     assert(BitboardAttacks.attacksSquare(bitboards, Pos(3, 1), Piece(Color.Black, PieceType.Pawn), Pos(4, 0)))
+    assert(BitboardAttacks.attacksSquare(bitboards, Pos(0, 1), Piece(Color.White, PieceType.Pawn), Pos(1, 2)))
+    assert(BitboardAttacks.attacksSquare(bitboards, Pos(4, 0), Piece(Color.White, PieceType.King), Pos(4, 1)))
+    assert(!BitboardAttacks.attacksSquare(bitboards, Pos(4, 0), Piece(Color.White, PieceType.King), Pos(4, 2)))
+    assert(BitboardAttacks.attacksSquare(Bitboards.empty, Pos(3, 0), Piece(Color.White, PieceType.Queen), Pos(3, 3)))
+    assert(!BitboardAttacks.attacksSquare(Bitboards.empty, Pos(3, 0), Piece(Color.White, PieceType.Queen), Pos(5, 1)))
+    assert(!BitboardAttacks.attacksSquare(bitboards, Pos(0, 6), Piece(Color.Black, PieceType.Pawn), Pos(1, 7)))
     assert(BitboardAttacks.attacksSquare(bitboards, Pos(7, 3), Piece(Color.Black, PieceType.Bishop), Pos(4, 0)))
     assert(!BitboardAttacks.attacksSquare(bitboards, Pos(4, 0), Piece(Color.White, PieceType.King), Pos(4, 0)))
     assert(!BitboardAttacks.attacksSquare(bitboards, Bitboards.index(Pos(4, 0)), Piece(Color.White, PieceType.King), Bitboards.index(Pos(4, 0))))
@@ -133,4 +139,59 @@ final class BitboardsSpec extends AnyFunSuite:
     assert(!Rules.isInCheck(blocked, Color.White))
     assert(Rules.isInCheck(open, Color.White))
     assert(BitboardAttacks.isInCheck(open.bitboards, Color.White))
+  }
+
+  test("BitboardAttacks attacksFrom covers piece kinds, sliders and pawn board edges") {
+    val board = Board.empty.copy(
+      pieces = Map(
+        Pos(3, 3) -> Piece(Color.White, PieceType.Queen),
+        Pos(5, 5) -> Piece(Color.White, PieceType.Bishop),
+        Pos(3, 6) -> Piece(Color.Black, PieceType.Pawn),
+        Pos(6, 3) -> Piece(Color.Black, PieceType.Rook)
+      )
+    )
+    val bitboards = board.bitboards
+    val from = Bitboards.index(Pos(3, 3))
+
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.King)) & Bitboards.mask(Pos(4, 4))) != 0L)
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.Knight)) & Bitboards.mask(Pos(4, 5))) != 0L)
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.Pawn)) & Bitboards.mask(Pos(2, 4))) != 0L)
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.Bishop)) & Bitboards.mask(Pos(5, 5))) != 0L)
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.Bishop)) & Bitboards.mask(Pos(6, 6))) == 0L)
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.Rook)) & Bitboards.mask(Pos(3, 6))) != 0L)
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.Rook)) & Bitboards.mask(Pos(3, 7))) == 0L)
+    assert((BitboardAttacks.attacksFrom(bitboards, from, Piece(Color.White, PieceType.Queen)) & Bitboards.mask(Pos(6, 3))) != 0L)
+    assert(BitboardAttacks.attacksFrom(Bitboards.empty, Bitboards.index(Pos(0, 7)), Piece(Color.White, PieceType.Pawn)) == 0L)
+    assert(BitboardAttacks.attacksFrom(Bitboards.empty, Bitboards.index(Pos(7, 0)), Piece(Color.Black, PieceType.Pawn)) == 0L)
+  }
+
+  test("BitboardAttacks kind-specific queries cover every attacker family") {
+    val board = Board.empty.copy(
+      pieces = Map(
+        Pos(4, 4) -> Piece(Color.White, PieceType.King),
+        Pos(5, 3) -> Piece(Color.Black, PieceType.Pawn),
+        Pos(2, 3) -> Piece(Color.Black, PieceType.Knight),
+        Pos(1, 1) -> Piece(Color.Black, PieceType.Bishop),
+        Pos(4, 0) -> Piece(Color.Black, PieceType.Rook),
+        Pos(0, 4) -> Piece(Color.Black, PieceType.Queen),
+        Pos(5, 5) -> Piece(Color.Black, PieceType.King)
+      )
+    )
+    val bitboards = board.bitboards
+
+    assert(BitboardAttacks.isAttackedByKind(bitboards, Color.Black, PieceType.Pawn, Pos(4, 2)))
+    assert(BitboardAttacks.isAttackedByKind(bitboards, Color.Black, PieceType.Knight, Pos(4, 4)))
+    assert(BitboardAttacks.isAttackedByKind(bitboards, Color.Black, PieceType.Bishop, Pos(4, 4)))
+    assert(BitboardAttacks.isAttackedByKind(bitboards, Color.Black, PieceType.Rook, Pos(4, 4)))
+    assert(BitboardAttacks.isAttackedByKind(bitboards, Color.Black, PieceType.Queen, Pos(4, 4)))
+    assert(BitboardAttacks.isAttackedByKind(bitboards, Color.Black, PieceType.King, Pos(4, 4)))
+    assert(!BitboardAttacks.isAttackedByKind(bitboards, Color.White, PieceType.Queen, Pos(4, 4)))
+    assert(BitboardAttacks.clearPath(Bitboards.empty.occupied, Bitboards.index(Pos(0, 0)), Bitboards.index(Pos(0, 1))))
+  }
+
+  test("BitboardAttacks sameRay defensive fallback rejects unknown steps") {
+    val method = BitboardAttacks.getClass.getDeclaredMethod("sameRay", classOf[Int], classOf[Int], classOf[Int])
+    method.setAccessible(true)
+
+    assert(method.invoke(BitboardAttacks, Int.box(0), Int.box(1), Int.box(2)) == java.lang.Boolean.FALSE)
   }

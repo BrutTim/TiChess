@@ -33,6 +33,37 @@ final class TournamentJsonProtocolSpec extends AnyFunSuite with TournamentJsonPr
     assert(gameHeartbeat.`type` == "heartbeat")
   }
 
+  test("parses tournament gameStart participants from player objects") {
+    val event =
+      """{
+        |  "type": "gameStart",
+        |  "round": 2,
+        |  "gameId": "abc123",
+        |  "color": "white",
+        |  "white": { "id": "bot-1", "name": "TiChess" },
+        |  "black": { "id": "bot-2", "name": "Opponent" }
+        |}""".stripMargin.parseJson.convertTo[TournamentEvent]
+
+    assert(event.gameId.contains("abc123"))
+    assert(event.white.contains(TournamentPlayer(Some("bot-1"), Some("TiChess"))))
+    assert(event.black.contains(TournamentPlayer(Some("bot-2"), Some("Opponent"))))
+  }
+
+  test("parses tournament gameStart participants from flat fields") {
+    val event =
+      """{
+        |  "type": "gameStart",
+        |  "gameId": "def456",
+        |  "color": "black",
+        |  "whiteName": "Opponent",
+        |  "blackId": "bot-1",
+        |  "blackName": "TiChess"
+        |}""".stripMargin.parseJson.convertTo[TournamentEvent]
+
+    assert(event.white.contains(TournamentPlayer(None, Some("Opponent"))))
+    assert(event.black.contains(TournamentPlayer(Some("bot-1"), Some("TiChess"))))
+  }
+
   test("clock parser remains compatible with payloads without increment") {
     val clock = """{"whiteTime":42.0,"blackTime":41.5}""".parseJson.convertTo[TournamentClock]
 

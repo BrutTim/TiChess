@@ -10,7 +10,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContext, Future}
 
-class TournamentBotRunner(client: TournamentClient, tournamentId: String, bot: ChessBot)(implicit system: ActorSystem[?], ec: ExecutionContext):
+class TournamentBotRunner(
+    client: TournamentClient,
+    tournamentId: String,
+    bot: ChessBot,
+    botName: String,
+    botId: Option[String] = None
+)(implicit system: ActorSystem[?], ec: ExecutionContext):
   private val startedGames = ConcurrentHashMap.newKeySet[String]()
 
   def start(join: Boolean): Unit =
@@ -22,26 +28,60 @@ class TournamentBotRunner(client: TournamentClient, tournamentId: String, bot: C
       }
 
     client.streamTournament(tournamentId).runWith(Sink.foreach {
-      case TournamentEvent("gameStart", round, Some(gameId), Some(color)) =>
-        val botColor = parseColor(color)
-        if startedGames.add(gameId) then
-          println(s"Tournament game started: $gameId, round ${round.getOrElse(0)}, bot plays $botColor")
-          startGameLoop(gameId, botColor)
-        else
-          println(s"Tournament game $gameId is already connected; ignoring replayed gameStart.")
-      case TournamentEvent("roundStarted", round, _, _) =>
+      case event @ TournamentEvent("gameStart", round, Some(gameId), _, _, _) =>
+        botColorFor(event) match
+          case Some(botColor) =>
+            if startedGames.add(gameId) then
+              println(s"Tournament game started: $gameId, round ${round.getOrElse(0)}, bot plays $botColor")
+              startGameLoop(gameId, botColor)
+            else
+              println(s"Tournament game $gameId is already connected; ignoring replayed gameStart.")
+          case None =>
+            val players = describePlayers(event)
+            println(s"Ignoring tournament game $gameId because bot '$botName' is not a participant$players.")
+      case TournamentEvent("roundStarted", round, _, _, _, _) =>
         println(s"Tournament round ${round.getOrElse(0)} started.")
-      case TournamentEvent("roundFinished", round, _, _) =>
+      case TournamentEvent("roundFinished", round, _, _, _, _) =>
         println(s"Tournament round ${round.getOrElse(0)} finished.")
-      case TournamentEvent("tournamentStarted", _, _, _) =>
+      case TournamentEvent("tournamentStarted", _, _, _, _, _) =>
         println("Tournament started.")
-      case TournamentEvent("tournamentFinished", _, _, _) =>
+      case TournamentEvent("tournamentFinished", _, _, _, _, _) =>
         println("Tournament finished.")
-      case TournamentEvent("heartbeat", _, _, _) =>
+      case TournamentEvent("heartbeat", _, _, _, _, _) =>
         ()
       case other =>
         println(s"Ignoring tournament event ${other.`type`}.")
     }).failed.foreach(e => println(s"Tournament stream failed: ${e.getMessage}"))
+
+  private def botColorFor(event: TournamentEvent): Option[Color] =
+    val playerFieldsPresent = event.white.nonEmpty || event.black.nonEmpty
+    val matchingColor =
+      if isOurPlayer(event.white) then Some(Color.White)
+      else if isOurPlayer(event.black) then Some(Color.Black)
+      else None
+
+    matchingColor.orElse {
+      if playerFieldsPresent then None
+      else
+        println(s"Tournament game ${event.gameId.getOrElse("?")} has no player metadata; trusting stream color '${event.color.getOrElse("?")}'.")
+        event.color.map(parseColor)
+    }
+
+  private def isOurPlayer(player: Option[TournamentPlayer]): Boolean =
+    player.exists { candidate =>
+      candidate.id.exists(id => botId.exists(_.equalsIgnoreCase(id))) ||
+        candidate.name.exists(_.equalsIgnoreCase(botName))
+    }
+
+  private def describePlayers(event: TournamentEvent): String =
+    val white = event.white.flatMap(describePlayer)
+    val black = event.black.flatMap(describePlayer)
+    (white, black) match
+      case (None, None) => ""
+      case _ => s" (white=${white.getOrElse("?")}, black=${black.getOrElse("?")})"
+
+  private def describePlayer(player: TournamentPlayer): Option[String] =
+    player.name.orElse(player.id)
 
   private def startGameLoop(gameId: String, botColor: Color): Unit =
     val currentState = AtomicReference[AppState](AppState(Game.initial))

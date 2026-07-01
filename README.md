@@ -240,6 +240,10 @@ kubectl -n tichess logs -f deployment/tournament-bot
 Falls `TOURNAMENT_TOKEN` fehlt, registriert sich der Bot einmalig mit
 `TOURNAMENT_BOT_NAME` und gibt den erzeugten Token im Log aus. Diesen Token
 sollte man anschließend als `TOURNAMENT_TOKEN` wiederverwenden.
+Wenn der Turnierserver Player-Metadaten im Turnierstream liefert, filtert der
+Bot fremde Partien anhand von `TOURNAMENT_BOT_NAME` oder optional
+`TOURNAMENT_BOT_ID`. Die ID wird bei einer neuen Registrierung im Log
+ausgegeben und kann zusammen mit dem Token wiederverwendet werden.
 
 ## Lokales Kubernetes mit k3d
 

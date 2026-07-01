@@ -6,7 +6,7 @@ import org.scalatest.funsuite.AnyFunSuite
 
 import java.nio.file.Files
 import java.io.File
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
 
@@ -57,6 +57,22 @@ final class BotCoverageSpec extends AnyFunSuite:
     val loaded = db.loadFromPgnString(pgn.replace("\n", "\r\n"), maxMovesPerGame = 1)
     assert(loaded == 1)
     assert(db.positionCount >= 1)
+    assert(PgnOpeningDatabase().loadFromPgnString(pgn) == 1)
+
+    val blackWinPgn =
+      """[Event "Black win"]
+        |[Result "0-1"]
+        |
+        |1. e2e4 0-1
+        |""".stripMargin
+    val drawPgn =
+      """[Event "Draw"]
+        |[Result "1/2-1/2"]
+        |
+        |1. e2e4 1/2-1/2
+        |""".stripMargin
+    assert(PgnOpeningDatabase().loadFromPgnString(blackWinPgn, maxMovesPerGame = 1) == 1)
+    assert(PgnOpeningDatabase().loadFromPgnString(drawPgn, maxMovesPerGame = 1) == 1)
 
     val unclearResultPgn =
       """[Event "Unclear"]
@@ -70,6 +86,26 @@ final class BotCoverageSpec extends AnyFunSuite:
         |1. e2e4 *
         |""".stripMargin
     assert(db.loadFromPgnString(unclearResultPgn, maxMovesPerGame = 1) == 1)
+  }
+
+  test("ChessBot default helpers are safe no-ops") {
+    val bot = new ChessBot:
+      override val name: String = "stub"
+
+      override def chooseMove(
+          state: AppState,
+          remainingTimeMs: Option[Long],
+          incrementMs: Option[Long]
+      ) =
+        Future.successful(Left(s"$remainingTimeMs/$incrementMs"))
+
+    val state = AppState(Game.initial)
+
+    assert(bot.name == "stub")
+    assert(Await.result(bot.ponder(state, maxWarmupMs = 1L), 2.seconds) == ())
+    assert(bot.predictedReply(state).isEmpty)
+    assert(bot.predictedReplies(state).isEmpty)
+    assert(Await.result(bot.chooseMove(state), 2.seconds) == Left("None/None"))
   }
 
   test("ZobristHash changes for side, castling, en-passant and halfmove state") {
@@ -191,6 +227,7 @@ final class BotCoverageSpec extends AnyFunSuite:
     assert(SyzygyTablebase.fromConfiguredPath(None, localDefaultAvailable = false, None).isEmpty)
     assert(SyzygyTablebase.fromConfiguredPath(Some(""), localDefaultAvailable = false, None).isEmpty)
     assert(SyzygyTablebase.fromConfiguredPath(Some("/tmp/syzygy"), localDefaultAvailable = false, Some("python-custom")).nonEmpty)
+    assert(SyzygyTablebase.fromConfiguredPath(Some("/tmp/syzygy"), localDefaultAvailable = false, None, Some("probe.py")).nonEmpty)
     assert(SyzygyTablebase.fromConfiguredPath(None, localDefaultAvailable = true, None).nonEmpty)
 
     val python = Files.createTempFile("python", ".bin").toFile

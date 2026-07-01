@@ -15,7 +15,15 @@ final case class TournamentRegisterRequest(name: String, isBot: Boolean)
 final case class TournamentRegisterResponse(id: String, token: String)
 final case class TournamentOk(ok: Boolean)
 final case class TournamentClock(whiteTime: Double, blackTime: Double, increment: Option[Double] = None)
-final case class TournamentEvent(`type`: String, round: Option[Int] = None, gameId: Option[String] = None, color: Option[String] = None)
+final case class TournamentPlayer(id: Option[String] = None, name: Option[String] = None)
+final case class TournamentEvent(
+    `type`: String,
+    round: Option[Int] = None,
+    gameId: Option[String] = None,
+    color: Option[String] = None,
+    white: Option[TournamentPlayer] = None,
+    black: Option[TournamentPlayer] = None
+)
 final case class TournamentGameEvent(
     `type`: String,
     fen: Option[String] = None,
@@ -48,8 +56,72 @@ trait TournamentJsonProtocol extends DefaultJsonProtocol:
         increment = fields.get("increment").map(_.convertTo[Double])
       )
 
-  implicit val tournamentEventFormat: RootJsonFormat[TournamentEvent] = jsonFormat4(TournamentEvent.apply)
+  implicit object tournamentPlayerFormat extends RootJsonFormat[TournamentPlayer]:
+    override def write(player: TournamentPlayer): JsValue =
+      JsObject(
+        Map.empty[String, JsValue] ++
+          player.id.map(value => "id" -> JsString(value)) ++
+          player.name.map(value => "name" -> JsString(value))
+      )
+
+    override def read(json: JsValue): TournamentPlayer =
+      json match
+        case JsString(name) => TournamentPlayer(name = Some(name))
+        case JsObject(fields) =>
+          TournamentPlayer(
+            id = firstString(fields, "id", "userId", "botId", "_id"),
+            name = firstString(fields, "name", "username", "displayName", "userName")
+          )
+        case _ => TournamentPlayer()
+
+  implicit object tournamentEventFormat extends RootJsonFormat[TournamentEvent]:
+    override def write(event: TournamentEvent): JsValue =
+      JsObject(
+        Map("type" -> JsString(event.`type`)) ++
+          event.round.map(value => "round" -> JsNumber(value)) ++
+          event.gameId.map(value => "gameId" -> JsString(value)) ++
+          event.color.map(value => "color" -> JsString(value)) ++
+          event.white.map(value => "white" -> value.toJson) ++
+          event.black.map(value => "black" -> value.toJson)
+      )
+
+    override def read(json: JsValue): TournamentEvent =
+      val fields = json.asJsObject.fields
+      val players = fields.get("players").collect { case JsObject(values) => values }.getOrElse(Map.empty)
+      TournamentEvent(
+        `type` = fields("type").convertTo[String],
+        round = fields.get("round").map(_.convertTo[Int]),
+        gameId = firstString(fields, "gameId", "gameID", "id"),
+        color = firstString(fields, "color", "botColor"),
+        white = playerFrom(fields, players, "white"),
+        black = playerFrom(fields, players, "black")
+      )
+
   implicit val gameEventFormat: RootJsonFormat[TournamentGameEvent] = jsonFormat8(TournamentGameEvent.apply)
+
+  private def firstString(fields: Map[String, JsValue], names: String*): Option[String] =
+    names.iterator.flatMap(name => fields.get(name).flatMap(asString)).find(_.nonEmpty)
+
+  private def asString(value: JsValue): Option[String] =
+    value match
+      case JsString(text) => Some(text)
+      case JsNumber(number) => Some(number.toString)
+      case _ => None
+
+  private def playerFrom(
+      fields: Map[String, JsValue],
+      players: Map[String, JsValue],
+      color: String
+  ): Option[TournamentPlayer] =
+    fields
+      .get(color)
+      .orElse(players.get(color))
+      .map(_.convertTo[TournamentPlayer])
+      .orElse {
+        val id = firstString(fields, s"${color}Id", s"${color}ID", s"${color}UserId", s"${color}BotId")
+        val name = firstString(fields, s"${color}Name", s"${color}Username", s"${color}UserName")
+        Option.when(id.nonEmpty || name.nonEmpty)(TournamentPlayer(id, name))
+      }
 
 class TournamentClient(baseUrl: String, token: String)(implicit system: ActorSystem[?], ec: ExecutionContext) extends TournamentJsonProtocol:
   private val cleanBaseUrl = baseUrl.stripSuffix("/")

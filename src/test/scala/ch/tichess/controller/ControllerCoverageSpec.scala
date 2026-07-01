@@ -12,6 +12,10 @@ final class ControllerCoverageSpec extends AnyFunSuite:
 
   given ExecutionContext = ExecutionContext.global
 
+  test("Controller opening database loader initializes the bundled PGN resource") {
+    assert(Controller.openingDb.positionCount >= 0)
+  }
+
   test("Command.parse covers command aliases and parser spacing branches") {
     assert(Command.parse("exit") == Right(Command.Quit))
     assert(Command.parse("h") == Right(Command.Help))

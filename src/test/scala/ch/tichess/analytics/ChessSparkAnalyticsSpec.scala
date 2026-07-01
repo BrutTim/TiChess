@@ -1,7 +1,7 @@
 package ch.tichess.analytics
 
-import ch.tichess.controller.Controller
-import ch.tichess.model.Color
+import ch.tichess.controller.{AppState, Controller}
+import ch.tichess.model.{Color, Fen}
 import org.apache.spark.sql.{Row, SparkSession}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
@@ -86,4 +86,41 @@ class ChessSparkAnalyticsSpec extends AnyFunSuite with BeforeAndAfterAll:
         )
         .isEmpty
     )
+  }
+
+  test("GameEventFactory covers start, moves, bot moves and result sources") {
+    val before = Controller.initialState
+    val afterMove = Controller.update(before, "e2 e4").state
+
+    val startEvent = GameEventFactory.create("game-2", "new", before, before, None).get
+    val moveEvent = GameEventFactory.create("game-2", "e2 e4", before, afterMove, None).get
+    val botEvent = GameEventFactory.create("game-2", "bot move", before, afterMove, None).get
+
+    assert(startEvent.eventType == "GameStarted")
+    assert(moveEvent.eventType == "MovePlayed")
+    assert(moveEvent.moveCount == 1L)
+    assert(botEvent.eventType == "MovePlayed")
+
+    val checkmateState = AppState(Fen.parse("7k/6Q1/6K1/8/8/8/8/8 b - - 0 1").toOption.get)
+    val checkmateEvent = GameEventFactory
+      .create("game-2", "g7 g8", before, checkmateState, Some("Checkmate"), timestamp = 99L)
+      .get
+    assert(checkmateEvent.eventType == "GameFinished")
+    assert(checkmateEvent.winner.contains("White"))
+    assert(checkmateEvent.result.contains("checkmate"))
+
+    val drawState = before.copy(drawAgreed = true)
+    val drawEvent = GameEventFactory.create("game-2", "accept", before, drawState, Some("Remis")).get
+    assert(drawEvent.winner.isEmpty)
+    assert(drawEvent.result.contains("draw"))
+
+    val whiteImport = GameEventFactory.create("game-2", "pgn import *", before, before, Some("White wins by PGN")).get
+    val blackImport = GameEventFactory.create("game-2", "pgn import *", before, before, Some("Black wins by PGN")).get
+    val remisImport = GameEventFactory.create("game-2", "pgn import *", before, before, Some("Remis (laut PGN)")).get
+
+    assert(whiteImport.winner.contains("White"))
+    assert(blackImport.winner.contains("Black"))
+    assert(remisImport.winner.isEmpty)
+    assert(remisImport.result.contains("draw"))
+    assert(GameEventFactory.create("game-2", "accept", drawState, drawState, Some("Remis")).isEmpty)
   }
